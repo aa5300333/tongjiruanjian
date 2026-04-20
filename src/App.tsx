@@ -78,11 +78,11 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1360;
+    return saved ? parseInt(saved) : 1300;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 920;
+    return saved ? parseInt(saved) : 965;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -895,10 +895,10 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen bg-[#E4E3E0] text-[#141414] font-sans ${standaloneMode ? 'p-0' : 'p-2 md:p-4'}`}>
+    <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
       <div 
-        className={`${standaloneMode ? 'w-full' : 'mx-auto'} space-y-4`}
-        style={{ maxWidth: standaloneMode ? 'none' : `${appWidth}px` }}
+        className="mx-auto space-y-4"
+        style={{ maxWidth: `${appWidth}px` }}
       >
         {error && (
           <motion.div 
@@ -985,7 +985,7 @@ export default function App() {
                           id="copy-data-btn"
                           onClick={handleCopyData}
                           disabled={totalTurnover === 0}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141414] text-white text-[10px] font-mono font-bold hover:bg-[#2a2a2a] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_4px_0_0_rgba(0,0,0,0.3)] active:shadow-none active:translate-y-[2px] rounded-sm uppercase tracking-tighter"
+                          className="flex items-center gap-1.5 px-2 py-1 bg-[#141414] text-white text-[10px] font-mono hover:bg-opacity-80 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <Copy size={12} />
                           复制数据
@@ -1741,18 +1741,7 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                    <button 
-                      onClick={() => {
-                        setTempAppWidth(1360);
-                        setTempAppHeight(920);
-                      }}
-                      className="text-[10px] font-mono underline opacity-50 hover:opacity-100"
-                    >
-                      恢复默认 (全视角)
-                    </button>
-                  </div>
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">宽</span>
@@ -1773,7 +1762,16 @@ export default function App() {
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度。为了完整显示49个风险值项，建议高度不低于 920 像素。</p>
+                  <button 
+                    onClick={() => {
+                      setTempAppWidth(1300);
+                      setTempAppHeight(965);
+                    }}
+                    className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
+                  >
+                    一键设置推荐分辨率 (1300 x 965)
+                  </button>
+                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">

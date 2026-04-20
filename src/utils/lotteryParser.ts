@@ -301,6 +301,11 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       });
     });
 
+    // 特殊处理：将 "345尾" 转换成 "3尾 4尾 5尾" 这种格式，防止后续数字串被错误拆分
+    normalized = normalized.replace(/(\d+)尾/g, (match, p1) => {
+      return p1.split('').map((c: string) => `${c}尾`).join(' ');
+    });
+
     return normalized
       .replace(whitelist, ' ')                    // 不在白名单内的全部替换为空格
       .replace(/(\d+)/g, ' $1 ')                  // 确保数字前后有空格，便于补零
@@ -308,6 +313,12 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       .trim()
       .split(' ')
       .flatMap(part => {
+        // 如果是 "3尾" 这种格式，尝试补齐数字
+        const tailMatch = part.match(/^(\d+)尾$/);
+        if (tailMatch) {
+          return [tailMatch[1].padStart(2, '0') + '尾'];
+        }
+
         if (/^\d+$/.test(part)) {
           if (part.length <= 2) {
             return [part.padStart(2, '0')];

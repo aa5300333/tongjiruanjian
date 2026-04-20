@@ -6,3 +6,13 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --font-serif: "Playfair Display", serif;
 }
+
+@layer base {
+  html, body {
+    @apply h-full w-full overflow-x-hidden;
+    background-color: #E4E3E0;
+  }
+  #root {
+    @apply h-full w-full;
+  }
+}
