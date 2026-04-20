@@ -75,10 +75,20 @@ export default function App() {
     return saved ? parseFloat(saved) : 4;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeView, setActiveView] = useState<'stats' | 'compound'>(() => {
-    const saved = localStorage.getItem('activeView');
-    return (saved === 'stats' || saved === 'compound') ? saved : 'stats';
-  });
+  const [tempOdds, setTempOdds] = useState(odds);
+  const [tempRebate, setTempRebate] = useState(rebate);
+  const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
+
+  // Initialize temp states when settings opens
+  useEffect(() => {
+    if (isSettingsOpen) {
+      setTempOdds(odds);
+      setTempRebate(rebate);
+      setTempEnableSearchUndo(enableSearchUndo);
+    }
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo]);
+
+  const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
   const [drawNumbers, setDrawNumbers] = useState<(number | null)[]>(() => {
     const saved = localStorage.getItem('drawNumbers');
     return saved ? JSON.parse(saved) : Array(7).fill(null);
@@ -105,17 +115,13 @@ export default function App() {
       if (e.key === 'compoundRecords') setCompoundRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'specialNumber') setSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
       if (e.key === 'enableSearchUndo') setEnableSearchUndo(e.newValue === 'true');
-      if (e.key === 'activeView') setActiveView(e.newValue as 'stats' | 'compound');
     };
 
     window.addEventListener('storage', handleStorageSync);
     return () => window.removeEventListener('storage', handleStorageSync);
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('activeView', activeView);
-  }, [activeView]);
-
+  // Auto-save data to localStorage
   useEffect(() => {
     localStorage.setItem('financeBetData', JSON.stringify(financeBetData));
   }, [financeBetData]);
@@ -417,8 +423,6 @@ export default function App() {
     if (targetRecord) {
       setUndoCallback({ 
         fn: () => {
-          // 撤销后将文字还原回输入框，方便用户查看或修改
-          setModalInputValue(targetRecord!.fullRaw);
           handleUndo(targetRecord!.id);
         }, 
         label: `${targetRecord.raw}` 
@@ -1080,7 +1084,9 @@ export default function App() {
                   
                   <div className="flex flex-col gap-2">
                     <button
-                      onClick={handlePopOut}
+                      onClick={() => {
+                        setIsModalOpen(true);
+                      }}
                       className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
                     >
                       <Plus size={20} />
@@ -1220,7 +1226,9 @@ export default function App() {
 
                     <div className="flex flex-col gap-2">
                        <button
-                        onClick={handlePopOut}
+                        onClick={() => {
+                          setIsModalOpen(true);
+                        }}
                         className="w-full bg-indigo-600 text-white py-5 font-mono text-base font-bold hover:bg-indigo-700 transition-all active:translate-y-1 flex items-center justify-center gap-2"
                       >
                         <Plus size={20} />
@@ -1592,8 +1600,8 @@ export default function App() {
                   <div className="relative">
                     <input 
                       type="number" 
-                      value={odds}
-                      onChange={(e) => setOdds(parseFloat(e.target.value) || 0)}
+                      value={tempOdds}
+                      onChange={(e) => setTempOdds(parseFloat(e.target.value) || 0)}
                       className="w-full p-3 font-mono text-base border-2 border-[#141414] focus:outline-none focus:bg-gray-50"
                     />
                     <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-mono opacity-30">倍</span>
@@ -1606,8 +1614,8 @@ export default function App() {
                   <div className="relative">
                     <input 
                       type="number" 
-                      value={rebate}
-                      onChange={(e) => setRebate(parseFloat(e.target.value) || 0)}
+                      value={tempRebate}
+                      onChange={(e) => setTempRebate(parseFloat(e.target.value) || 0)}
                       className="w-full p-3 font-mono text-base border-2 border-[#141414] focus:outline-none focus:bg-gray-50"
                     />
                     <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-mono opacity-30">%</span>
@@ -1622,16 +1630,35 @@ export default function App() {
                       <p className="text-[10px] font-mono opacity-40">开启后，若识别框有内容，点击撤销将优先匹配流水中的该条记录。</p>
                     </div>
                     <button 
-                      onClick={() => setEnableSearchUndo(!enableSearchUndo)}
-                      className={`w-10 h-5 rounded-full transition-colors relative ${enableSearchUndo ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                      onClick={() => setTempEnableSearchUndo(!tempEnableSearchUndo)}
+                      className={`w-10 h-5 rounded-full transition-colors relative ${tempEnableSearchUndo ? 'bg-indigo-600' : 'bg-gray-300'}`}
                     >
-                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${enableSearchUndo ? 'left-6' : 'left-1'}`} />
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempEnableSearchUndo ? 'left-6' : 'left-1'}`} />
                     </button>
                   </div>
                 </div>
 
+                <div className="space-y-2 pt-2 border-t border-gray-100">
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest block text-blue-600">高级：多窗口录入助手</label>
+                  <a 
+                    href={window.location.origin + window.location.pathname + '?mode=entry'} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="block w-full p-3 font-mono text-center text-[11px] border-2 border-dashed border-blue-200 hover:border-blue-500 hover:text-blue-600 transition-colors bg-blue-50/30"
+                  >
+                    🚀 点击在新网页中打开录入工具
+                  </a>
+                  <p className="text-[9px] font-mono opacity-50">打开后，您可以将新页面缩小并移到桌面任意位置。在此助手录入的数据会自动同步回此大窗口。</p>
+                </div>
+
                 <button 
-                  onClick={() => setIsSettingsOpen(false)}
+                  onClick={() => {
+                    // Only apply changes on Save
+                    setOdds(tempOdds);
+                    setRebate(tempRebate);
+                    setEnableSearchUndo(tempEnableSearchUndo);
+                    setIsSettingsOpen(false);
+                  }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"
                 >
                   保存并关闭 (SAVE & CLOSE)
