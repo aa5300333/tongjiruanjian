@@ -985,7 +985,7 @@ export default function App() {
                           id="copy-data-btn"
                           onClick={handleCopyData}
                           disabled={totalTurnover === 0}
-                          className="flex items-center gap-1.5 px-2 py-1 bg-[#141414] text-white text-[10px] font-mono hover:bg-opacity-80 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141414] text-white text-[10px] font-mono font-bold hover:bg-[#2a2a2a] transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_4px_0_0_rgba(0,0,0,0.3)] active:shadow-none active:translate-y-[2px] rounded-sm uppercase tracking-tighter"
                         >
                           <Copy size={12} />
                           复制数据
