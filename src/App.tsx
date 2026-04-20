@@ -75,7 +75,10 @@ export default function App() {
     return saved ? parseFloat(saved) : 4;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
+  const [activeView, setActiveView] = useState<'stats' | 'compound'>(() => {
+    const saved = localStorage.getItem('activeView');
+    return (saved === 'stats' || saved === 'compound') ? saved : 'stats';
+  });
   const [drawNumbers, setDrawNumbers] = useState<(number | null)[]>(() => {
     const saved = localStorage.getItem('drawNumbers');
     return saved ? JSON.parse(saved) : Array(7).fill(null);
@@ -102,13 +105,17 @@ export default function App() {
       if (e.key === 'compoundRecords') setCompoundRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'specialNumber') setSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
       if (e.key === 'enableSearchUndo') setEnableSearchUndo(e.newValue === 'true');
+      if (e.key === 'activeView') setActiveView(e.newValue as 'stats' | 'compound');
     };
 
     window.addEventListener('storage', handleStorageSync);
     return () => window.removeEventListener('storage', handleStorageSync);
   }, []);
 
-  // Auto-save data to localStorage
+  useEffect(() => {
+    localStorage.setItem('activeView', activeView);
+  }, [activeView]);
+
   useEffect(() => {
     localStorage.setItem('financeBetData', JSON.stringify(financeBetData));
   }, [financeBetData]);
@@ -1073,9 +1080,7 @@ export default function App() {
                   
                   <div className="flex flex-col gap-2">
                     <button
-                      onClick={() => {
-                        setIsModalOpen(true);
-                      }}
+                      onClick={handlePopOut}
                       className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
                     >
                       <Plus size={20} />
@@ -1215,9 +1220,7 @@ export default function App() {
 
                     <div className="flex flex-col gap-2">
                        <button
-                        onClick={() => {
-                          setIsModalOpen(true);
-                        }}
+                        onClick={handlePopOut}
                         className="w-full bg-indigo-600 text-white py-5 font-mono text-base font-bold hover:bg-indigo-700 transition-all active:translate-y-1 flex items-center justify-center gap-2"
                       >
                         <Plus size={20} />
@@ -1625,19 +1628,6 @@ export default function App() {
                       <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${enableSearchUndo ? 'left-6' : 'left-1'}`} />
                     </button>
                   </div>
-                </div>
-
-                <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <label className="text-xs font-mono font-bold uppercase tracking-widest block text-blue-600">高级：多窗口录入助手</label>
-                  <a 
-                    href={window.location.origin + window.location.pathname + '?mode=entry'} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="block w-full p-3 font-mono text-center text-[11px] border-2 border-dashed border-blue-200 hover:border-blue-500 hover:text-blue-600 transition-colors bg-blue-50/30"
-                  >
-                    🚀 点击在新网页中打开录入工具
-                  </a>
-                  <p className="text-[9px] font-mono opacity-50">打开后，您可以将新页面缩小并移到桌面任意位置。在此助手录入的数据会自动同步回此大窗口。</p>
                 </div>
 
                 <button 
