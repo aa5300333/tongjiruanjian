@@ -76,10 +76,20 @@ export default function App() {
     const saved = localStorage.getItem('rebate');
     return saved ? parseFloat(saved) : 4;
   });
+  const [appWidth, setAppWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('appWidth');
+    return saved ? parseInt(saved) : 1280;
+  });
+  const [appHeight, setAppHeight] = useState<number>(() => {
+    const saved = localStorage.getItem('appHeight');
+    return saved ? parseInt(saved) : 865;
+  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
   const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
+  const [tempAppWidth, setTempAppWidth] = useState(appWidth);
+  const [tempAppHeight, setTempAppHeight] = useState(appHeight);
 
   // Initialize temp states when settings opens
   useEffect(() => {
@@ -87,8 +97,10 @@ export default function App() {
       setTempOdds(odds);
       setTempRebate(rebate);
       setTempEnableSearchUndo(enableSearchUndo);
+      setTempAppWidth(appWidth);
+      setTempAppHeight(appHeight);
     }
-  }, [isSettingsOpen, odds, rebate, enableSearchUndo]);
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo, appWidth, appHeight]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
@@ -884,7 +896,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
-      <div className="max-w-7xl mx-auto space-y-4">
+      <div 
+        className="mx-auto space-y-4"
+        style={{ maxWidth: `${appWidth}px` }}
+      >
         {error && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
@@ -921,7 +936,7 @@ export default function App() {
               <TrendingUp size={18} />
               <span className="text-[10px] font-bold lg:[writing-mode:vertical-rl]">复式管理</span>
             </button>
-            <div className="flex flex-row lg:flex-col gap-1 flex-1 lg:flex-none lg:mt-auto">
+            <div className="flex flex-row lg:flex-col gap-1 flex-1 lg:flex-none">
               <button 
                 onClick={() => setIsSettingsOpen(true)}
                 className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors"
@@ -950,7 +965,10 @@ export default function App() {
           {activeView === 'stats' ? (
             <>
               {/* Left Column: Number Distribution Matrix */}
-              <div className="lg:col-span-6 space-y-1 h-[885px]">
+              <div 
+                className="lg:col-span-6 space-y-1"
+                style={{ height: `${appHeight}px` }}
+              >
                 <section className="bg-white border border-[#141414] p-4 h-full flex flex-col overflow-hidden">
                   <div className="flex flex-col gap-1 mb-4">
                     <div className="flex items-center justify-between">
@@ -1012,7 +1030,7 @@ export default function App() {
 
                   <div className="grid grid-cols-5 gap-x-0.5 gap-y-1 mb-4">
                     {(() => {
-                      const rows = 12; 
+                      const rows = 10; 
                       const indices = [];
                       for (let r = 0; r < rows; r++) {
                         for (let c = 0; c < 5; c++) {
@@ -1023,7 +1041,7 @@ export default function App() {
                             else num = null;
                           } else {
                             // Columns 1-4
-                            num = c * 12 + r + 1;
+                            num = c * 10 + r + 1;
                             if (num >= 49) num = null;
                           }
                           indices.push(num);
@@ -1078,7 +1096,7 @@ export default function App() {
                       {financeRecords.length === 0 ? (
                         <p className="text-[9px] font-mono opacity-40 italic py-1 text-center">暂无入账记录</p>
                       ) : (
-                        financeRecords.slice(0, 10).map(record => {
+                        financeRecords.slice(0, 10).map((record, index, arr) => {
                           const winningAmount = specialNumber && specialNumber > 0
                             ? record.items.reduce((sum, item) => {
                                 const hitCount = item.targets.filter(t => t === specialNumber).length;
@@ -1087,7 +1105,7 @@ export default function App() {
                             : 0;
 
                           return (
-                            <div key={record.id} className="group border-b border-dashed border-[#141414] border-opacity-10 pb-1 relative overflow-hidden">
+                            <div key={record.id} className={`group ${index === arr.length - 1 ? '' : 'border-b border-dashed border-[#141414] border-opacity-10'} pb-1 relative overflow-hidden`}>
                               <div className="flex justify-between items-start">
                                 <span className="text-[10px] font-mono opacity-60">{record.time}</span>
                                 <div className="flex items-center gap-2">
@@ -1169,7 +1187,10 @@ export default function App() {
               </div>
 
               {/* Right Column: Risk Analysis (Vertical List) */}
-              <div className="lg:col-span-3 space-y-1 h-[885px]">
+              <div 
+                className="lg:col-span-3 space-y-1"
+                style={{ height: `${appHeight}px` }}
+              >
                 <section className="bg-white border border-[#141414] flex flex-col h-full">
                   <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
                     <AlertCircle size={12} className="text-red-600" />
@@ -1195,17 +1216,17 @@ export default function App() {
                         return (
                           <div 
                             key={item.num} 
-                            className={`py-0.5 px-1 border-b border-gray-100 flex items-center justify-between transition-colors ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
+                            className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
                             style={{ height: '17px' }}
                           >
                             <div className="flex items-center gap-1 leading-none">
-                              <span className="text-[10px] font-mono font-bold text-[#141414] w-4">{index + 1}</span>
-                              <span className={`text-[12px] font-mono font-bold w-5 ${textColor}`}>{item.num.toString().padStart(2, '0')}</span>
-                              <span className={`text-[12px] font-bold w-5 h-4 flex items-center justify-center bg-black/5 rounded-sm ${textColor}`}>{zodiac}</span>
-                              <span className="text-[11px] font-mono font-bold text-[#141414]">¥{item.amount.toFixed(0)}</span>
+                              <span className={`text-sm font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
+                              <span className={`text-base font-mono font-bold w-6 ${textColor}`}>{item.num.toString().padStart(2, '0')}</span>
+                              <span className={`text-base font-bold w-6 h-4 flex items-center justify-center bg-black/5 rounded-sm ${textColor}`}>{zodiac}</span>
+                              <span className={`text-[15px] font-mono font-bold ${textColor}`}>¥{item.amount.toFixed(0)}</span>
                             </div>
-                            <div className={`text-[11px] font-mono font-bold leading-none ${item.risk < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                              {item.risk < 0 ? '亏' : '赚'} ¥{Math.abs(item.risk).toFixed(0)}
+                            <div className={`text-[15px] font-mono font-bold leading-none ${textColor}`}>
+                              {item.risk < 0 ? '-' : ''}¥{Math.abs(item.risk).toFixed(0)}
                             </div>
                           </div>
                         );
@@ -1719,6 +1740,31 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="space-y-4 pt-2 border-t border-gray-100">
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">宽</span>
+                      <input 
+                        type="number" 
+                        value={tempAppWidth}
+                        onChange={(e) => setTempAppWidth(parseInt(e.target.value) || 0)}
+                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
+                      />
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">高</span>
+                      <input 
+                        type="number" 
+                        value={tempAppHeight}
+                        onChange={(e) => setTempAppHeight(parseInt(e.target.value) || 0)}
+                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。</p>
+                </div>
+
                 <div className="space-y-2 pt-2 border-t border-gray-100">
                   <label className="text-xs font-mono font-bold uppercase tracking-widest block text-blue-600">高级：多窗口录入助手</label>
                   <a 
@@ -1738,6 +1784,13 @@ export default function App() {
                     setOdds(tempOdds);
                     setRebate(tempRebate);
                     setEnableSearchUndo(tempEnableSearchUndo);
+                    setAppWidth(tempAppWidth);
+                    setAppHeight(tempAppHeight);
+                    localStorage.setItem('odds', tempOdds.toString());
+                    localStorage.setItem('rebate', tempRebate.toString());
+                    localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
+                    localStorage.setItem('appWidth', tempAppWidth.toString());
+                    localStorage.setItem('appHeight', tempAppHeight.toString());
                     setIsSettingsOpen(false);
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"

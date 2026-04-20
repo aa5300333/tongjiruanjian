@@ -38,17 +38,17 @@ export const HOMOPHONES: Record<string, string> = {
 };
 
 export const ZODIAC_HOMOPHONES: Record<string, string[]> = {
-  '鼠': ['鼠', '书', '数'],
+  '鼠': ['鼠', '书'],
   '牛': ['牛', '扭', '妞'],
   '虎': ['虎', '府', '付'],
   '兔': ['兔', '吐', '免'],
   '龙': ['龙', '隆', '拢'],
   '蛇': ['蛇', '舌', '舍'],
-  '马': ['马', '码', '嘛'],
+  '马': ['马', '嘛'],
   '羊': ['羊', '阳', '洋'],
   '猴': ['猴', '候', '后'],
   '鸡': ['鸡', '机', '基'],
-  '狗': ['狗', '勾', '购'],
+  '狗': ['狗', '购'],
   '猪': ['猪', '朱', '珠'],
 };
 
@@ -108,6 +108,32 @@ function chineseToNumber(chinese: string): number {
 }
 
 /**
+ * 智能拆分连在一起的数字串（如 2535 -> 25, 35）
+ * 优先匹配 1-49 之间的两位数，不合法的则拆分为个位数
+ */
+function smartSplitDigits(nStr: string): number[] {
+  const result: number[] = [];
+  let i = 0;
+  while (i < nStr.length) {
+    const twoDigits = nStr.slice(i, i + 2);
+    const val2 = parseInt(twoDigits, 10);
+    
+    if (twoDigits.length === 2 && val2 >= 1 && val2 <= 49) {
+      result.push(val2);
+      i += 2;
+    } else {
+      const oneDigit = nStr.slice(i, i + 1);
+      const val1 = parseInt(oneDigit, 10);
+      if (oneDigit.length === 1 && !isNaN(val1) && val1 >= 1 && val1 <= 49) {
+        result.push(val1);
+      }
+      i += 1;
+    }
+  }
+  return result;
+}
+
+/**
  * 解析输入字符串
  * 遵循用户最新指令：
  * 1. “各”、“字”或其谐音之后的第一组数字为金额。
@@ -119,10 +145,10 @@ export function parseInput(input: string): ParseResult[] {
   let processed = input;
   
   // 扩充关键词库，涵盖所有对话中出现的变体
-  // 注意：元、米、斤、块、位 等通常作为金额后缀，不应作为起始关键词，否则会误切分（如“10元15号”会被切成“10”和“15号”）
   const KEYWORDS = [
+    '每个号码', '各个号码', '各号', '各码', '每个', '每号', '每码',
     '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥', ':', '=', '/', 
-    '数', '号', '：', '＝', '每数', '每个', '每号', '各号', '各是', '个是'
+    '数', '号', '码', '号码', '：', '＝'
   ];
   const IGNORE_TARGETS = ['合计', '总计', '总共', '共计', '累计', '合计金额', '总额'];
   const HEADER_KEYWORDS = [
@@ -143,9 +169,18 @@ export function parseInput(input: string): ParseResult[] {
   let cleanedInput = processed.replace(summaryRegex, '');
   cleanedInput = cleanedInput.replace(headerRegex, ' ');
 
-  // 2. 将所有行合并为一个长字符串，处理跨行指令
-  // 移除多余的换行，用空格替代，使跨行的“各50”能找到前面的目标
-  const unifiedInput = cleanedInput.split(/[\n\r]+/).map(l => l.trim()).filter(l => l).join(' ');
+  // 2. 处理跨行指令，并在特定情况下转换 "-"
+  // 逻辑：如果输入包含 "18-100" 这种格式，且 "-" 后的数字大于 49，则将其转换为 "18各100"
+  let preProcessed = cleanedInput.replace(/(\d+)\s*-\s*(\d+)(?![-\d])/g, (match, p1, p2) => {
+    const num = parseInt(p1, 10);
+    const amount = parseInt(p2, 10);
+    if (num <= 49 && amount > 49) {
+      return `${p1}各${p2}`;
+    }
+    return match;
+  });
+
+  const unifiedInput = preProcessed.split(/[\n\r]+/).map(l => l.trim()).filter(l => l).join(' ');
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
@@ -252,22 +287,36 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
-    // 允许的字符白名单：数字、生肖(含多音字/错别字)、分类(家禽野兽)、颜色、大小单双、范围关键词
-    const allHomophones = Object.values(ZODIAC_HOMOPHONES).flat().join('');
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百${allHomophones}家禽野兽肖红蓝绿大小单双到尾中碰反字数合金木水火土]`, 'g');
+    // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
+    // 注意：此处不再包含谐音字，确保识别结果“按标准来”
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽肖红蓝绿大小单双到尾中碰反字数合金木水火土]`, 'g');
     
-    return str
+    // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
+    let normalized = str;
+    Object.entries(ZODIAC_HOMOPHONES).forEach(([real, variations]) => {
+      variations.forEach(v => {
+        if (v !== real) {
+          normalized = normalized.replace(new RegExp(v, 'g'), real);
+        }
+      });
+    });
+
+    return normalized
       .replace(whitelist, ' ')                    // 不在白名单内的全部替换为空格
       .replace(/(\d+)/g, ' $1 ')                  // 确保数字前后有空格，便于补零
       .replace(/\s+/g, ' ')                       // 合并多个空格
       .trim()
       .split(' ')
-      .map(part => {
+      .flatMap(part => {
         if (/^\d+$/.test(part)) {
-          // 对所有独立数字补零
-          return part.padStart(2, '0');
+          if (part.length <= 2) {
+            return [part.padStart(2, '0')];
+          } else {
+            // 对连在一起的长数字串进行智能拆分并补零显示
+            return smartSplitDigits(part).map(n => n.toString().padStart(2, '0'));
+          }
         }
-        return part;
+        return [part];
       })
       .join(' ')                                  // 先用空格连接
       .replace(/([^\d])\s+([^\d])/g, '$1$2')      // 移除文字间的空格 (如 "猪 狗" -> "猪狗")
@@ -315,8 +364,23 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   } else {
     // 特码逻辑：收集该段内所有的号码
     const allNumbers: number[] = [];
-    let displayRaw = cleanDisplayRaw(targetsStr);
     let remainingStr = targetsStr; // 用于提取独立数字的剩余字符串
+
+    // 预处理：移除 targetsStr 中可能存在的干扰关键词 (如“号码”、“每个”)
+    const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
+    sortedKws.forEach(kw => {
+      const kwRegex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      remainingStr = remainingStr.replace(kwRegex, ' ');
+    });
+
+    let displayRaw = cleanDisplayRaw(targetsStr);
+    // 再次清理 displayRaw，移除由于 targetsStr 包含关键词而留下的杂质（如“号码”中的“号”）
+    sortedKws.forEach(kw => {
+      const kwRegex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      displayRaw = displayRaw.replace(kwRegex, ' ');
+    });
+    // 修改：不再移除所有空格，只合并空格并修整边缘，确保数字间保留空格
+    displayRaw = displayRaw.replace(/\s+/g, ' ').trim(); 
 
     // 0. 处理分类 (家禽/野兽)
     // 逻辑说明：此处直接映射到生肖名称。解析时通过 getNumbersByZodiac(z) 动态获取号码。
@@ -329,8 +393,9 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     CATEGORIES.forEach(cat => {
       const pattern = cat.key.join('|');
       const regex = new RegExp(pattern, 'g');
-      if (regex.test(targetsStr)) {
-        const count = (targetsStr.match(regex) || []).length;
+      // 使用 remainingStr 进行检测，防止命中已被移除的关键词
+      if (regex.test(remainingStr)) {
+        const count = (remainingStr.match(regex) || []).length;
         for (let i = 0; i < count; i++) {
           cat.zodiacs.forEach(z => {
             allNumbers.push(...getNumbersByZodiac(z));
@@ -346,7 +411,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     // 1. 处理 "X尾" (支持多位，如 "1478尾")
     const tailRegex = /(\d+|[零一二三四五六七八九]+)尾/g;
     let tailMatch;
-    while ((tailMatch = tailRegex.exec(targetsStr)) !== null) {
+    // 使用 remainingStr 进行正则匹配
+    while ((tailMatch = tailRegex.exec(remainingStr)) !== null) {
       const tailStr = tailMatch[1];
       if (/^\d+$/.test(tailStr)) {
         // 如果是纯数字，拆分每个数字作为尾数
@@ -369,7 +435,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     // 2. 处理 "X到Y"
     const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*到\s*(\d+|[一二三四五六七八九十百]+)/g;
     let rangeMatch;
-    while ((rangeMatch = rangeRegex.exec(targetsStr)) !== null) {
+    // 使用 remainingStr 进行正则匹配
+    while ((rangeMatch = rangeRegex.exec(remainingStr)) !== null) {
       const startStr = rangeMatch[1];
       const endStr = rangeMatch[2];
       const start = /\d/.test(startStr) ? parseInt(startStr, 10) : chineseToNumber(startStr);
@@ -465,25 +532,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
           const n = parseInt(nStr, 10);
           if (n >= 1 && n <= 49) allNumbers.push(n);
         } else {
-          // 智能拆分：当连在一起的数字超过2位时（如 3015），优先按两位一组拆分
-          let i = 0;
-          while (i < nStr.length) {
-            const twoDigits = nStr.slice(i, i + 2);
-            const val2 = parseInt(twoDigits, 10);
-            
-            if (twoDigits.length === 2 && val2 >= 1 && val2 <= 49) {
-              allNumbers.push(val2);
-              i += 2;
-            } else {
-              // 如果两位不合法（如超过49），则取一位尝试
-              const oneDigit = nStr.slice(i, i + 1);
-              const val1 = parseInt(oneDigit, 10);
-              if (oneDigit.length === 1 && !isNaN(val1) && val1 >= 1 && val1 <= 49) {
-                allNumbers.push(val1);
-              }
-              i += 1;
-            }
-          }
+          // 使用智能拆分函数处理长数字串
+          allNumbers.push(...smartSplitDigits(nStr));
         }
       });
     }
