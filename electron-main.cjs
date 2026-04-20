@@ -3,10 +3,9 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1211,
-    height: 964,
+    width: 1200,
+    height: 800,
     title: "六合彩财务智能统计软件",
-    resizable: true,
     icon: path.join(__dirname, 'dist/favicon.ico'), // 如果有图标的话
     webPreferences: {
       nodeIntegration: false,

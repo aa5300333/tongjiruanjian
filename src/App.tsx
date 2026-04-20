@@ -78,11 +78,11 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1211;
+    return saved ? parseInt(saved) : 1120;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 964;
+    return saved ? parseInt(saved) : 865;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -1773,12 +1773,12 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => {
-                      setTempAppWidth(1211);
-                      setTempAppHeight(964);
+                      setTempAppWidth(1120);
+                      setTempAppHeight(865);
                     }}
                     className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    一键设置推荐分辨率 (1211 x 964)
+                    一键设置推荐分辨率 (1120 x 865)
                   </button>
                   <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
                 </div>
