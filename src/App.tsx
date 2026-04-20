@@ -15,10 +15,12 @@ import {
   Search,
   AlertCircle,
   X,
-  Settings
+  Settings,
+  Minus,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx-js-style';
 import { parseInput, ZODIAC_LIST, getNumbersByZodiac } from './utils/lotteryParser';
 
 interface BetItem {
@@ -89,6 +91,7 @@ export default function App() {
   }, [isSettingsOpen, odds, rebate, enableSearchUndo]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
+  const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
   const [drawNumbers, setDrawNumbers] = useState<(number | null)[]>(() => {
     const saved = localStorage.getItem('drawNumbers');
     return saved ? JSON.parse(saved) : Array(7).fill(null);
@@ -105,6 +108,9 @@ export default function App() {
     if (params.get('mode') === 'entry') {
       setStandaloneMode(true);
       setIsModalOpen(true);
+      if (params.get('type') === 'deduct') {
+        setModalMode('deduct');
+      }
     }
 
     // Listener for cross-window sync
@@ -484,14 +490,40 @@ export default function App() {
     setShowResetConfirm(false);
   };
 
+  const handleCopyData = () => {
+    const activeBets = Object.entries(financeBetData)
+      .filter(([_, amount]) => (amount as number) > 0)
+      .sort(([a], [b]) => parseInt(a) - parseInt(b));
+
+    if (activeBets.length === 0) return;
+
+    const dataString = "上报散码数据:\n" + 
+      activeBets.map(([num, amount]) => `${num.padStart(2, '0')}=${(amount as number).toFixed(0)}`).join(' ');
+
+    navigator.clipboard.writeText(dataString).then(() => {
+      // Temporary visual feedback
+      const btn = document.getElementById('copy-data-btn');
+      if (btn) {
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '已复制';
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+        }, 1500);
+      }
+    });
+  };
+
   const handleExport = () => {
     try {
-      const records = activeView === 'stats' ? financeRecords : compoundRecords;
+      const sourceRecords = activeView === 'stats' ? financeRecords : compoundRecords;
       
-      if (records.length === 0) {
+      if (sourceRecords.length === 0) {
         setError('当前没有可导出的记录');
         return;
       }
+
+      // 数据顺序开始排到结束 (Oldest to Latest)
+      const records = [...sourceRecords].reverse();
 
       // Determine which special draw number to use based on the active view
       const regularDraw = drawNumbers.slice(0, 6).filter((n): n is number => n !== null);
@@ -509,17 +541,18 @@ export default function App() {
 
         record.items.forEach(item => {
           if (activeView === 'stats') {
-            // Normal stats view win logic (Special number only)
             const itemTotalStake = item.amount * item.targets.length;
-            if (specialDraw !== null && item.targets.includes(specialDraw)) {
-              winningStake += item.amount;
-              payout += (item.amount * odds) + (itemTotalStake * currentRebate / 100);
-            } else {
-              payout += (itemTotalStake * currentRebate / 100);
+            if (specialDraw !== null) {
+              const hitCount = item.targets.filter(t => t === specialDraw).length;
+              if (hitCount > 0) {
+                winningStake += item.amount * hitCount;
+                payout += (item.amount * hitCount * odds) + (itemTotalStake * currentRebate / 100);
+              } else {
+                payout += (itemTotalStake * currentRebate / 100);
+              }
             }
           } else {
-            // Compound view win logic
-            const itemTotalStake = item.amount; // In compound view, amount is per combination
+            const itemTotalStake = item.amount;
             if (item.raw.includes('特碰')) {
               const hasSpecial = specialDraw !== null && item.targets.includes(specialDraw);
               const otherNum = item.targets.find(t => t !== specialDraw);
@@ -548,7 +581,7 @@ export default function App() {
         });
 
         return {
-          winningStake: Number(winningStake.toFixed(2)),
+          winningStake: winningStake > 0 ? Number(winningStake.toFixed(2)) : "",
           payout: Number(payout.toFixed(2)),
           totalAmount: Math.abs(record.totalAmount),
           fullRaw: record.fullRaw || record.raw || '',
@@ -563,16 +596,32 @@ export default function App() {
       ];
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-      // Add comments to the third column (Bet Amount) - now Column C
+      // Apply styles and comments
       exportData.forEach((d, i) => {
-        const cellRef = XLSX.utils.encode_cell({ r: i + 1, c: 2 });
+        const row = i + 1; // Header is row 0
+
+        // Column C: Bet Amount (Alignment, Bold, Size 11)
+        const cellC = XLSX.utils.encode_cell({ r: row, c: 2 });
+        if (ws[cellC]) {
+          ws[cellC].s = {
+            font: { sz: 11, bold: true },
+            alignment: { horizontal: "center", vertical: "center" }
+          };
+          
+          // Add comment to C column
+          if (d.fullRaw) {
+            ws[cellC].c = [{ t: String(d.fullRaw).trim(), a: "录入原文" }];
+            (ws[cellC].c as any).hidden = true;
+          }
+        }
         
-        if (d.fullRaw) {
-          ws[cellRef].c = [{
-            t: String(d.fullRaw).trim(),
-            a: "录入原文"
-          }];
-          (ws[cellRef].c as any).hidden = true;
+        // Column D: Winning Amount (Red, Bold, Center, Size 11)
+        const cellD = XLSX.utils.encode_cell({ r: row, c: 3 });
+        if (ws[cellD]) {
+          ws[cellD].s = {
+            font: { sz: 11, bold: true, color: { rgb: "FF0000" } },
+            alignment: { horizontal: "center", vertical: "center" }
+          };
         }
       });
 
@@ -724,9 +773,13 @@ export default function App() {
         <div className="flex items-center justify-between border-b-2 border-[#141414] pb-2 mb-4">
           <div className="flex items-center gap-2">
             <Calculator size={18} />
-            <h3 className="text-xl font-serif italic font-bold">智能录入助手</h3>
+            <h3 className="text-xl font-serif italic font-bold">
+              {modalMode === 'deduct' ? '智能扣除助手' : '智能录入助手'}
+            </h3>
           </div>
-          <span className="text-[10px] font-mono font-bold bg-[#141414] text-white px-2 py-0.5 uppercase">Sync Active</span>
+          <span className={`text-[10px] font-mono font-bold text-white px-2 py-0.5 uppercase ${modalMode === 'deduct' ? 'bg-red-600' : 'bg-[#141414]'}`}>
+            {modalMode === 'deduct' ? 'Deduct Mode' : 'Record Mode'}
+          </span>
         </div>
 
         <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
@@ -774,10 +827,16 @@ export default function App() {
             <button onClick={triggerUndoAndPaste} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap text-red-600">撤销上条并粘贴</button>
           </div>
           
-          <button onClick={() => handleParse(false, modalInputValue)} disabled={!modalInputValue.trim()} className="w-full bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-base font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50">
-            <Plus size={20} />
-            保存下单 (SAVE)
-          </button>
+          <div className="grid grid-cols-2 gap-1 mt-1">
+            <button onClick={() => handleParse(false, modalInputValue)} disabled={!modalInputValue.trim()} className="bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50">
+              <Plus size={18} />
+              保存下单 (SAVE)
+            </button>
+            <button onClick={() => handleParse(true, modalInputValue)} disabled={!modalInputValue.trim()} className="bg-red-600 hover:bg-red-700 text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50">
+              <Minus size={18} />
+              扣除下单 (REMOVE)
+            </button>
+          </div>
         </div>
 
         {/* Standalone Undo Confirm */}
@@ -825,7 +884,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
-      <div className="max-w-7xl mx-auto space-y-4">
+      <div className="max-w-[1200px] mx-auto space-y-1">
         {error && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
@@ -841,69 +900,76 @@ export default function App() {
             </button>
           </motion.div>
         )}
-        {/* Compact Header & Tabs Row */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-[#141414] pb-2 gap-2">
-          {/* Global View Tabs */}
-          <div className="flex gap-1 bg-white p-0.5 border border-[#141414] w-fit">
+        {/* Compact Header & Tabs Row - REMOVED for space saving */}
+        
+        <main className="flex flex-col lg:flex-row gap-1">
+          {/* Vertical Sidebar Navigation */}
+          <nav className="flex lg:flex-col flex-row gap-1 w-full lg:w-10">
             <button 
               onClick={() => setActiveView('stats')}
-              className={`px-4 py-1.5 font-mono text-[11px] font-bold transition-all flex items-center gap-2 ${activeView === 'stats' ? 'bg-[#141414] text-white' : 'hover:bg-black/5'}`}
+              className={`flex-1 lg:flex-none h-10 lg:h-24 flex lg:flex-col items-center justify-center gap-1 border border-[#141414] transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white' : 'bg-white hover:bg-black/5'}`}
+              title="财务统计"
             >
-              <Calculator size={14} />
-              财务统计
+              <Calculator size={18} />
+              <span className="text-[10px] font-bold lg:[writing-mode:vertical-rl]">财务统计</span>
             </button>
             <button 
               onClick={() => setActiveView('compound')}
-              className={`px-4 py-1.5 font-mono text-[11px] font-bold transition-all flex items-center gap-2 ${activeView === 'compound' ? 'bg-[#141414] text-white' : 'hover:bg-black/5'}`}
+              className={`flex-1 lg:flex-none h-10 lg:h-24 flex lg:flex-col items-center justify-center gap-1 border border-[#141414] transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white' : 'bg-white hover:bg-black/5'}`}
+              title="复式管理"
             >
-              <TrendingUp size={14} />
-              复式管理
+              <TrendingUp size={18} />
+              <span className="text-[10px] font-bold lg:[writing-mode:vertical-rl]">复式管理</span>
             </button>
-          </div>
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors"
+              title="设置"
+            >
+              <Settings size={18} />
+            </button>
+            <button 
+              onClick={() => setShowResetConfirm(true)}
+              className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-red-600 hover:text-white transition-colors"
+              title="一键清零"
+            >
+              <RotateCcw size={18} />
+            </button>
+            <button 
+              onClick={handleExport}
+              className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-emerald-600 hover:text-white transition-colors"
+              title="导出记录"
+            >
+              <Download size={18} />
+            </button>
+          </nav>
 
-          {/* Stats & Actions */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1">
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-1.5 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors border border-[#141414]"
-                title="设置"
-              >
-                <Settings size={14} />
-              </button>
-              <button 
-                onClick={() => setShowResetConfirm(true)}
-                className="p-1.5 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors border border-[#141414]"
-                title="一键清零"
-              >
-                <RotateCcw size={14} />
-              </button>
-              <button 
-                onClick={handleExport}
-                className="p-1.5 hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors border border-[#141414]"
-                title="导出记录"
-              >
-                <Download size={14} />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <main className="grid grid-cols-1 lg:grid-cols-12 gap-1">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-1 flex-1">
           {activeView === 'stats' ? (
             <>
               {/* Left Column: Number Distribution Matrix */}
-              <div className="lg:col-span-6 space-y-1">
-                <section className="bg-white border border-[#141414] p-4 h-full flex flex-col">
+              <div className="lg:col-span-6 space-y-1 h-[950px]">
+                <section className="bg-white border border-[#141414] p-4 h-full flex flex-col overflow-hidden">
                   <div className="flex flex-col gap-1 mb-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Hash size={16} />
                         <h2 className="text-xs font-mono font-bold uppercase tracking-widest">号码分布矩阵</h2>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-mono opacity-50 uppercase">总和</span>
-                        <span className="text-lg font-mono font-bold">¥{totalTurnover.toLocaleString()}</span>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] font-mono opacity-50 uppercase">总和</span>
+                          <span className="text-lg font-mono font-bold">¥{totalTurnover.toLocaleString()}</span>
+                        </div>
+                        <button 
+                          id="copy-data-btn"
+                          onClick={handleCopyData}
+                          disabled={totalTurnover === 0}
+                          className="flex items-center gap-1.5 px-2 py-1 bg-[#141414] text-white text-[10px] font-mono hover:bg-opacity-80 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Copy size={12} />
+                          复制数据
+                        </button>
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-2">
@@ -991,7 +1057,7 @@ export default function App() {
                   </div>
 
                   {/* History Section moved inside Matrix */}
-                  <div className="mt-2 pt-2 border-t border-[#141414] border-opacity-10">
+                  <div className="mt-2 pt-2 border-t border-[#141414] border-opacity-10 flex-1 flex flex-col min-h-0">
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <History size={14} />
@@ -1006,13 +1072,16 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    <div className="max-h-[120px] overflow-y-auto space-y-1 pr-1">
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                       {financeRecords.length === 0 ? (
                         <p className="text-[9px] font-mono opacity-40 italic py-1 text-center">暂无入账记录</p>
                       ) : (
-                        financeRecords.slice(0, 5).map(record => {
+                        financeRecords.slice(0, 10).map(record => {
                           const winningAmount = specialNumber && specialNumber > 0
-                            ? record.items.reduce((sum, item) => item.targets.includes(specialNumber) ? sum + item.amount : sum, 0)
+                            ? record.items.reduce((sum, item) => {
+                                const hitCount = item.targets.filter(t => t === specialNumber).length;
+                                return sum + (hitCount * item.amount);
+                              }, 0)
                             : 0;
 
                           return (
@@ -1085,6 +1154,7 @@ export default function App() {
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={() => {
+                        setModalMode('save');
                         setIsModalOpen(true);
                       }}
                       className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
@@ -1097,7 +1167,7 @@ export default function App() {
               </div>
 
               {/* Right Column: Risk Analysis (Vertical List) */}
-              <div className="lg:col-span-3 space-y-1">
+              <div className="lg:col-span-3 space-y-1 h-[950px]">
                 <section className="bg-white border border-[#141414] flex flex-col h-full">
                   <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
                     <AlertCircle size={12} className="text-red-600" />
@@ -1381,6 +1451,7 @@ export default function App() {
               </div>
             </>
           )}
+          </div>
         </main>
 
         {/* Footer Info */}
@@ -1512,14 +1583,22 @@ export default function App() {
                   撤销上条并粘贴
                 </button>
               </div>
-              <div className="w-full mt-1">
+              <div className="grid grid-cols-2 gap-1 mt-1">
                 <button 
                   onClick={() => handleParse(false, modalInputValue)}
                   disabled={!modalInputValue.trim()}
-                  className="w-full bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-base font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50"
+                  className="w-full bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-sm font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50"
                 >
-                  <Plus size={20} />
+                  <Plus size={18} />
                   保存下单 (SAVE)
+                </button>
+                <button 
+                  onClick={() => handleParse(true, modalInputValue)}
+                  disabled={!modalInputValue.trim()}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white border border-red-600 py-4 text-sm font-bold transition-all active:bg-red-800 flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50"
+                >
+                  <Minus size={18} />
+                  扣除下单 (REMOVE)
                 </button>
               </div>
             </motion.div>
@@ -1728,7 +1807,10 @@ export default function App() {
                 ) : (
                   (activeView === 'stats' ? financeRecords : compoundRecords).map(record => {
                     const winningAmount = activeView === 'stats' && specialNumber 
-                      ? record.items.reduce((sum, item) => item.targets.includes(specialNumber) ? sum + item.amount : sum, 0)
+                      ? record.items.reduce((sum, item) => {
+                          const hitCount = item.targets.filter(t => t === specialNumber).length;
+                          return sum + (hitCount * item.amount);
+                        }, 0)
                       : 0;
 
                     return (
