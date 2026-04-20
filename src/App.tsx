@@ -78,11 +78,11 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1280;
+    return saved ? parseInt(saved) : 1360;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 865;
+    return saved ? parseInt(saved) : 920;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -895,10 +895,10 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
+    <div className={`min-h-screen bg-[#E4E3E0] text-[#141414] font-sans ${standaloneMode ? 'p-0' : 'p-2 md:p-4'}`}>
       <div 
-        className="mx-auto space-y-4"
-        style={{ maxWidth: `${appWidth}px` }}
+        className={`${standaloneMode ? 'w-full' : 'mx-auto'} space-y-4`}
+        style={{ maxWidth: standaloneMode ? 'none' : `${appWidth}px` }}
       >
         {error && (
           <motion.div 
@@ -1741,7 +1741,18 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
-                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
+                    <button 
+                      onClick={() => {
+                        setTempAppWidth(1360);
+                        setTempAppHeight(920);
+                      }}
+                      className="text-[10px] font-mono underline opacity-50 hover:opacity-100"
+                    >
+                      恢复默认 (全视角)
+                    </button>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">宽</span>
@@ -1762,7 +1773,7 @@ export default function App() {
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。</p>
+                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度。为了完整显示49个风险值项，建议高度不低于 920 像素。</p>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">
