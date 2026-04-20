@@ -898,7 +898,7 @@ export default function App() {
     <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
       <div 
         className="mx-auto space-y-4"
-        style={{ maxWidth: `${appWidth}px` }}
+        style={{ width: `${appWidth}px`, minWidth: `${appWidth}px` }}
       >
         {error && (
           <motion.div 
@@ -967,7 +967,7 @@ export default function App() {
               {/* Left Column: Number Distribution Matrix */}
               <div 
                 className="lg:col-span-6 space-y-1"
-                style={{ height: `${appHeight}px` }}
+                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
               >
                 <section className="bg-white border border-[#141414] p-4 h-full flex flex-col overflow-hidden">
                   <div className="flex flex-col gap-1 mb-4">
@@ -1028,21 +1028,21 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-5 gap-x-0.5 gap-y-1 mb-4">
+                  <div className="grid grid-cols-5 gap-x-2 gap-y-1 mb-4">
                     {(() => {
-                      const rows = 10; 
+                      const rows = 12; 
                       const indices = [];
                       for (let r = 0; r < rows; r++) {
                         for (let c = 0; c < 5; c++) {
                           let num = null;
                           if (c === 4) {
-                            // Column 5
+                            // 第5列：49 号置顶 (R1, C5)
                             if (r === 0) num = 49;
                             else num = null;
                           } else {
-                            // Columns 1-4
-                            num = c * 10 + r + 1;
-                            if (num >= 49) num = null;
+                            // 第1-4列：每列12个号码，排列 01-48 号
+                            num = c * 12 + r + 1;
+                            if (num > 48) num = null;
                           }
                           indices.push(num);
                         }
@@ -1067,7 +1067,7 @@ export default function App() {
                                 {getZodiacByNumber(num)}
                               </span>
                             </div>
-                            <div className="w-16 h-6 flex items-center justify-end px-1 border border-gray-200 text-right text-xs font-mono font-bold bg-white text-[#141414]">
+                            <div className="w-18 h-6 flex items-center justify-end px-1 border border-gray-200 text-right text-xs font-mono font-bold bg-white text-[#141414]">
                               {amount > 0 ? amount.toFixed(0) : ''}
                             </div>
                           </div>
@@ -1161,7 +1161,10 @@ export default function App() {
               </div>
 
               {/* Middle Column: Input & History & Settings */}
-              <div className="lg:col-span-3 space-y-1">
+              <div 
+                className="lg:col-span-3 space-y-1"
+                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+              >
                 {/* Input Section */}
                 <section className="bg-white border border-[#141414] p-4">
                   <div className="flex items-center justify-between mb-4">
@@ -1189,7 +1192,7 @@ export default function App() {
               {/* Right Column: Risk Analysis (Vertical List) */}
               <div 
                 className="lg:col-span-3 space-y-1"
-                style={{ height: `${appHeight}px` }}
+                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
               >
                 <section className="bg-white border border-[#141414] flex flex-col h-full">
                   <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
@@ -1239,7 +1242,10 @@ export default function App() {
           ) : (
             <>
               {/* Compound Management View */}
-              <div className="lg:col-span-4 space-y-1">
+              <div 
+                className="lg:col-span-4 space-y-1"
+                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+              >
                 {/* Opening Results Section */}
                 <section className="bg-white border border-[#141414] p-4">
                   <div className="flex items-center justify-between mb-4">
@@ -1332,7 +1338,10 @@ export default function App() {
                 </section>
               </div>
 
-              <div className="lg:col-span-8 space-y-4">
+              <div 
+                className="lg:col-span-8 space-y-4"
+                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+              >
                 <section className="bg-white border border-[#141414] p-4 flex flex-col h-full min-h-[400px]">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-4">

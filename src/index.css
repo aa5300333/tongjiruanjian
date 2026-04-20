@@ -9,10 +9,7 @@
 
 @layer base {
   html, body {
-    @apply h-full w-full overflow-x-hidden;
+    @apply min-h-screen w-full;
     background-color: #E4E3E0;
-  }
-  #root {
-    @apply h-full w-full;
   }
 }
