@@ -883,8 +883,8 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
-      <div className="max-w-[1200px] mx-auto space-y-1">
+    <div className="h-screen w-screen bg-[#E4E3E0] text-[#141414] font-sans overflow-hidden flex items-center justify-center p-0">
+      <div className="w-[1200px] h-[1000px] bg-[#E4E3E0] p-2 flex flex-col lg:flex-row gap-1 overflow-hidden relative">
         {error && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
@@ -944,11 +944,11 @@ export default function App() {
             </button>
           </nav>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-1 flex-1">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-1 flex-1 h-full min-h-0">
           {activeView === 'stats' ? (
             <>
               {/* Left Column: Number Distribution Matrix */}
-              <div className="lg:col-span-6 space-y-1 h-[950px]">
+              <div className="lg:col-span-6 space-y-1 h-[885px]">
                 <section className="bg-white border border-[#141414] p-4 h-full flex flex-col overflow-hidden">
                   <div className="flex flex-col gap-1 mb-4">
                     <div className="flex items-center justify-between">
@@ -1167,7 +1167,7 @@ export default function App() {
               </div>
 
               {/* Right Column: Risk Analysis (Vertical List) */}
-              <div className="lg:col-span-3 space-y-1 h-[950px]">
+              <div className="lg:col-span-3 space-y-1 h-[885px]">
                 <section className="bg-white border border-[#141414] flex flex-col h-full">
                   <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
                     <AlertCircle size={12} className="text-red-600" />
@@ -1453,27 +1453,6 @@ export default function App() {
           )}
           </div>
         </main>
-
-        {/* Footer Info */}
-        <footer className="pt-8 border-t border-[#141414] border-opacity-10 flex flex-col md:flex-row justify-between gap-4">
-          <div className="flex gap-6">
-            <div className="space-y-1">
-              <span className="text-[10px] font-mono opacity-50 uppercase block">System Status</span>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-mono font-bold">READY • REAL-TIME SYNC ACTIVE</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <span className="text-[10px] font-mono opacity-50 uppercase block">Data Integrity</span>
-              <span className="text-[10px] font-mono font-bold">VERIFIED • REGEX PARSER V2.4</span>
-            </div>
-          </div>
-          <div className="text-[10px] font-mono opacity-30 text-right">
-            © 2026 LOTTERY FINANCIAL INTELLIGENCE SYSTEM. ALL RIGHTS RESERVED.
-          </div>
-        </footer>
-      </div>
 
       {/* Data Entry Modal */}
       <AnimatePresence>
@@ -1875,6 +1854,7 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }
