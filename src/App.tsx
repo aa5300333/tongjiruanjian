@@ -146,6 +146,8 @@ export default function App() {
       if (e.key === 'financeRecords') setFinanceRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'compoundRecords') setCompoundRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'specialNumber') setSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
+      if (e.key === 'odds') setOdds(e.newValue ? parseFloat(e.newValue) : 48.5);
+      if (e.key === 'rebate') setRebate(e.newValue ? parseFloat(e.newValue) : 4);
       if (e.key === 'enableSearchUndo') setEnableSearchUndo(e.newValue === 'true');
       if (e.key === 'requireUndoConfirm') setRequireUndoConfirm(e.newValue === 'true');
       if (e.key === 'requireUndoPasteConfirm') setRequireUndoPasteConfirm(e.newValue === 'true');
@@ -375,7 +377,7 @@ export default function App() {
       const previewData = formatModalResults(inputToParse);
       
       // Use the cleaned preview as the display name in history, truncated if needed
-      const previewLines = previewData.preview.split('\n').map(l => l.replace(/（合计：\d+）/, '').trim()).filter(l => l.length > 0);
+      const previewLines = previewData.rawPreview.split('\n').map(l => l.replace(/（合计：\d+）/, '').trim()).filter(l => l.length > 0);
       const displayRaw = previewLines.join(' ');
       const finalRaw = displayRaw.length > 100 ? displayRaw.substring(0, 100) + '...' : displayRaw;
 
@@ -384,7 +386,7 @@ export default function App() {
         time: new Date().toLocaleTimeString(),
         raw: finalRaw,
         fullRaw: inputToParse,
-        parsedPreview: previewData.preview,
+        parsedPreview: previewData.rawPreview,
         items,
         totalAmount: totalInputAmount,
         rebate: rebate
@@ -479,25 +481,19 @@ export default function App() {
     }
   };
 
-  const triggerUndoAndPaste = () => {
-    const records = activeView === 'stats' ? financeRecords : compoundRecords;
-    if (records.length > 0) {
-      if (requireUndoPasteConfirm) {
-        setUndoCallback({ 
-          fn: async () => {
-            handleUndo(records[0].id);
-            await handlePasteAndRecognize();
-          }, 
-          label: `${records[0].raw}` 
-        });
-        setShowLastUndoConfirm(true);
-      } else {
-        handleUndo(records[0].id);
-        handlePasteAndRecognize();
-      }
+  const triggerClearAndPaste = () => {
+    if (requireUndoPasteConfirm) {
+      setUndoCallback({ 
+        fn: async () => {
+          handleReset();
+          await handlePasteAndRecognize();
+        }, 
+        label: "确定清空所有数据并粘贴新内容？" 
+      });
+      setShowLastUndoConfirm(true);
     } else {
-      setError('没有可撤销的记录');
-      setTimeout(() => setError(null), 2000);
+      handleReset();
+      handlePasteAndRecognize();
     }
   };
 
@@ -583,31 +579,25 @@ export default function App() {
       const exportData = records.map(record => {
         let winningStake = 0;
         let payout = 0;
-        const currentRebate = record.rebate || 0;
+        const currentRebateVal = rebate; // 使用设置中的当前返水比例
+        const isDeduct = record.totalAmount < 0;
 
         record.items.forEach(item => {
+          let itemWinningStake = 0;
+          let itemTotalStake = 0;
+
           if (activeView === 'stats') {
-            const itemTotalStake = item.amount * item.targets.length;
-            if (specialDraw !== null) {
-              const hitCount = item.targets.filter(t => t === specialDraw).length;
-              if (hitCount > 0) {
-                winningStake += item.amount * hitCount;
-                payout += (item.amount * hitCount * odds) + (itemTotalStake * currentRebate / 100);
-              } else {
-                payout += (itemTotalStake * currentRebate / 100);
-              }
-            }
+            itemTotalStake = Math.abs(item.amount * item.targets.length);
+            const hitCount = item.targets.filter(t => t === specialDraw).length;
+            itemWinningStake = Math.abs(item.amount) * hitCount;
           } else {
-            const itemTotalStake = item.amount;
+            itemTotalStake = Math.abs(item.amount);
             if (item.raw.includes('特碰')) {
               const hasSpecial = specialDraw !== null && item.targets.includes(specialDraw);
               const otherNum = item.targets.find(t => t !== specialDraw);
               const hasRegular = otherNum !== undefined && regularDraw.includes(otherNum);
               if (hasSpecial && hasRegular) {
-                winningStake += item.amount;
-                payout += (item.amount * odds) + (itemTotalStake * currentRebate / 100);
-              } else {
-                payout += (itemTotalStake * currentRebate / 100);
+                itemWinningStake = Math.abs(item.amount);
               }
             } else {
               const matchCount = item.targets.filter(t => regularDraw.includes(t)).length;
@@ -617,27 +607,40 @@ export default function App() {
               else if (item.raw.includes('三中二')) isWin = matchCount >= 2;
 
               if (isWin) {
-                winningStake += item.amount;
-                payout += (item.amount * odds) + (itemTotalStake * currentRebate / 100);
-              } else {
-                payout += (itemTotalStake * currentRebate / 100);
+                itemWinningStake = Math.abs(item.amount);
               }
             }
           }
+
+          winningStake += itemWinningStake;
+          
+          // 赔付金额（含水） = 中奖金额*倍数 - 下注金额 + 返水
+          const rebateAmount = (itemTotalStake * currentRebateVal / 100);
+          const itemNetResult = (itemWinningStake * odds) - itemTotalStake + rebateAmount;
+          payout += itemNetResult;
         });
 
+        let displayPreview = record.parsedPreview || '';
+        if (isDeduct) {
+          // 将合计改为负数
+          displayPreview = displayPreview.replace(/（合计：(\d+(?:\.\d+)?)）/g, '（合计：-$1）');
+          // 扣除记录的赔付结果也应该是负数，表示回退之前的盈亏
+          payout = -payout;
+        }
+
         return {
-          winningStake: winningStake > 0 ? Number(winningStake.toFixed(2)) : "",
+          winningStake: winningStake > 0 ? (isDeduct ? -Number(winningStake.toFixed(2)) : Number(winningStake.toFixed(2))) : "",
           payout: Number(payout.toFixed(2)),
-          totalAmount: Math.abs(record.totalAmount),
+          totalAmount: isDeduct ? -Math.abs(record.totalAmount) : Math.abs(record.totalAmount),
           fullRaw: record.fullRaw || record.raw || '',
-          parsedPreview: record.parsedPreview || ''
+          parsedPreview: displayPreview,
+          isDeduct: isDeduct
         };
       });
 
       // Create worksheet data
       const wsData = [
-        ['原数据', '识别后的数据', '下注金额', '用户中奖金额', '赔付金额（未扣水）'],
+        ['原数据', '识别后的数据', '下注金额', '用户中奖金额', '赔付金额（含水）'],
         ...exportData.map(d => [d.fullRaw, d.parsedPreview, d.totalAmount, d.winningStake, d.payout])
       ];
       const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -645,6 +648,14 @@ export default function App() {
       // Apply styles and comments
       exportData.forEach((d, i) => {
         const row = i + 1; // Header is row 0
+
+        // Column B: Parsed Preview (Red if deduct)
+        const cellB = XLSX.utils.encode_cell({ r: row, c: 1 });
+        if (ws[cellB] && d.isDeduct) {
+          ws[cellB].s = {
+            font: { color: { rgb: "FF0000" } }
+          };
+        }
 
         // Column C: Bet Amount (Alignment, Bold, Size 11)
         const cellC = XLSX.utils.encode_cell({ r: row, c: 2 });
@@ -698,8 +709,25 @@ export default function App() {
     }
   };
 
-  const formatModalResults = (input: string): { preview: string, total: number } => {
-    if (!input.trim()) return { preview: '等待输入...', total: 0 };
+  const renderHighlightedText = (text: string) => {
+    const tokens = text.split(/(\d+)/);
+    return tokens.map((token, i) => {
+      if (/^\d+$/.test(token)) {
+        const n = parseInt(token, 10);
+        if (n > 49) {
+          return (
+            <span key={i} className="text-red-700 font-bold bg-red-100 px-0.5 rounded border border-red-300 mx-0.5" title="超出范围 (码数只能 01-49)">
+              {token}
+            </span>
+          );
+        }
+      }
+      return token;
+    });
+  };
+
+  const formatModalResults = (input: string): { preview: React.ReactNode, rawPreview: string, total: number } => {
+    if (!input.trim()) return { preview: '等待输入...', rawPreview: '等待输入...', total: 0 };
     try {
       if (activeView === 'compound') {
         const types = ['三中三', '二中二', '三中二', '特碰'];
@@ -725,7 +753,8 @@ export default function App() {
           }
 
           let totalBet = 0;
-          let preview = ``;
+          let previewLines: React.ReactNode[] = [];
+          let rawPreview = '';
           let hasValidBlock = false;
 
           segments.forEach((seg, idx) => {
@@ -784,32 +813,48 @@ export default function App() {
               if (segmentCount > 0) {
                 const subTotal = segmentCount * amountPerGroup;
                 totalBet += subTotal;
-                preview += `${type}: ${segmentNumbers.join(' | ')} 各${amountPerGroup}（合计：${subTotal}）\n`;
+                const lineText = `${type}: ${segmentNumbers.join(' | ')} 各${amountPerGroup}（合计：${subTotal}）`;
+                rawPreview += lineText + '\n';
+                previewLines.push(<div key={idx}>{lineText}</div>);
               }
             }
           });
 
           if (hasValidBlock) {
-            return { preview: preview.trim(), total: totalBet };
+            return { preview: <>{previewLines}</>, rawPreview: rawPreview.trim(), total: totalBet };
           }
         }
-        return { preview: '格式错误，未识别到玩法或金额。格式如："二中二 05-19 10"', total: 0 };
+        return { preview: '格式错误，未识别到玩法或金额。格式如："二中二 05-19 10"', rawPreview: '格式错误', total: 0 };
       }
 
       const results = parseInput(input);
-      if (results.length === 0) return { preview: '无法解析，请检查格式', total: 0 };
+      if (results.length === 0) return { preview: '无法解析，请检查格式', rawPreview: '无法解析', total: 0 };
       
       let grandTotal = 0;
-      const lines = results.map(res => {
+      const rawLines: string[] = [];
+      const previewLines: React.ReactNode[] = [];
+
+      results.forEach((res, idx) => {
         const count = res.numbers.length;
         const total = count * res.amount;
         grandTotal += total;
-        return `${res.raw} 各${res.amount}（合计：${total}）`;
+        const lineText = `${res.raw} 各${res.amount}（合计：${total}）`;
+        rawLines.push(lineText);
+
+        // 检测是否有大于 49 的数字
+        const hasInvalid = /\d+/.test(res.raw) && (res.raw.match(/\d+/g) || []).some(n => parseInt(n) > 49);
+
+        previewLines.push(
+          <div key={idx} className={hasInvalid ? "bg-red-50" : ""}>
+            {renderHighlightedText(res.raw)}
+            <span className="opacity-70"> 各{res.amount}（合计：{total}）</span>
+          </div>
+        );
       });
 
-      return { preview: lines.join('\n'), total: grandTotal };
+      return { preview: <>{previewLines}</>, rawPreview: rawLines.join('\n'), total: grandTotal };
     } catch (e) {
-      return { preview: '解析错误', total: 0 };
+      return { preview: '解析错误', rawPreview: '解析错误', total: 0 };
     }
   };
 
@@ -870,14 +915,14 @@ export default function App() {
             <button onClick={() => modalInputRef.current?.focus()} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">重新识别</button>
             <button onClick={() => setModalInputValue('')} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">清空</button>
             <button onClick={triggerLastUndo} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">撤销</button>
-            <button onClick={triggerUndoAndPaste} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap text-red-600">撤销上条并粘贴</button>
+            <button onClick={triggerClearAndPaste} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap text-red-600">清空数据并粘贴</button>
           </div>
           
-          <div className="grid grid-cols-2 gap-1 mt-1">
+          <div className="grid grid-cols-5 gap-1 mt-1">
             <button 
               onClick={() => handleParse(false, modalInputValue)} 
               disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue} 
-              className="bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
+              className="col-span-4 bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
             >
               <Plus size={18} />
               保存下单 (SAVE)
@@ -885,10 +930,10 @@ export default function App() {
             <button 
               onClick={() => handleParse(true, modalInputValue)} 
               disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue} 
-              className="bg-red-600 hover:bg-red-700 text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
+              className="col-span-1 bg-red-600 hover:bg-red-700 text-white py-4 text-xs font-bold transition-all flex items-center justify-center gap-1 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
             >
-              <Minus size={18} />
-              扣除下单 (REMOVE)
+              <Minus size={14} />
+              扣除
             </button>
           </div>
         </div>
@@ -903,7 +948,7 @@ export default function App() {
                 exit={{ scale: 0.9, opacity: 0 }}
                 className="bg-white border-4 border-[#141414] p-6 max-w-xs w-full shadow-2xl"
               >
-                <h3 className="text-lg font-serif italic font-bold mb-4">确认撤销此笔业务？</h3>
+                <h3 className="text-lg font-serif italic font-bold mb-4">操作确认</h3>
                 <div className="bg-gray-100 p-2 border-l-4 border-red-600 mb-4">
                   <span className="text-xs font-mono font-bold text-red-600 break-words">{undoCallback?.label}</span>
                 </div>
@@ -1099,17 +1144,17 @@ export default function App() {
                         return (
                           <div 
                             key={num}
-                            className={`flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded ${isSpecial ? 'bg-yellow-50 ring-1 ring-yellow-100' : ''}`}
+                            className={`flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded lottery-table ${isSpecial ? 'bg-yellow-50 ring-1 ring-yellow-100' : ''}`}
                           >
                             <div className="flex items-center gap-1 min-w-[42px]">
-                              <span className={`text-base font-mono font-bold ${textColor}`}>
+                              <span className={`text-base font-serif font-bold ${textColor}`}>
                                 {num.toString().padStart(2, '0')}
                               </span>
-                              <span className={`text-xs font-bold bg-black/5 px-1 rounded-sm ${textColor}`}>
+                              <span className={`text-[11pt] font-bold bg-black/5 px-1 rounded-sm ${textColor}`}>
                                 {getZodiacByNumber(num)}
                               </span>
                             </div>
-                            <div className="w-18 h-6 flex items-center justify-end px-1 border border-gray-200 text-right text-xs font-mono font-bold bg-white text-[#141414]">
+                            <div className="w-18 h-6 flex items-center justify-end px-1 border border-gray-200 text-right text-[11pt] font-bold bg-white text-[#141414]">
                               {amount > 0 ? amount.toFixed(0) : ''}
                             </div>
                           </div>
@@ -1281,16 +1326,16 @@ export default function App() {
                         return (
                           <div 
                             key={item.num} 
-                            className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
+                            className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
                             style={{ height: '17px' }}
                           >
                             <div className="flex items-center gap-1 leading-none">
-                              <span className={`text-sm font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
-                              <span className={`text-base font-mono font-bold w-6 ${textColor}`}>{item.num.toString().padStart(2, '0')}</span>
-                              <span className={`text-base font-bold w-6 h-4 flex items-center justify-center bg-black/5 rounded-sm ${textColor}`}>{zodiac}</span>
-                              <span className={`text-[15px] font-mono font-bold ${textColor}`}>¥{item.amount.toFixed(0)}</span>
+                              <span className={`text-[11pt] font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
+                              <span className={`text-[11pt] font-mono font-bold w-6 ${textColor}`}>{item.num.toString().padStart(2, '0')}</span>
+                              <span className={`text-[11pt] font-bold w-6 h-4 flex items-center justify-center bg-black/5 rounded-sm ${textColor}`}>{zodiac}</span>
+                              <span className={`text-[11pt] font-mono font-bold ${textColor}`}>¥{item.amount.toFixed(0)}</span>
                             </div>
-                            <div className={`text-[15px] font-mono font-bold leading-none ${textColor}`}>
+                            <div className={`text-[11pt] font-mono font-bold leading-none ${textColor}`}>
                               {item.risk < 0 ? '-' : ''}¥{Math.abs(item.risk).toFixed(0)}
                             </div>
                           </div>
@@ -1671,17 +1716,17 @@ export default function App() {
                   撤销
                 </button>
                 <button 
-                  onClick={triggerUndoAndPaste}
+                  onClick={triggerClearAndPaste}
                   className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-red-600 whitespace-nowrap"
                 >
-                  撤销上条并粘贴
+                  清空数据并粘贴
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-1 mt-1">
+              <div className="grid grid-cols-5 gap-1 mt-1">
                 <button 
                   onClick={() => handleParse(false, modalInputValue)}
                   disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue}
-                  className="w-full bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-sm font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
+                  className="col-span-4 bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-sm font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
                 >
                   <Plus size={18} />
                   保存下单 (SAVE)
@@ -1689,10 +1734,10 @@ export default function App() {
                 <button 
                   onClick={() => handleParse(true, modalInputValue)}
                   disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white border border-red-600 py-4 text-sm font-bold transition-all active:bg-red-800 flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
+                  className="col-span-1 bg-red-600 hover:bg-red-700 text-white border border-red-600 py-4 text-xs font-bold transition-all active:bg-red-800 flex items-center justify-center gap-1 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
                 >
-                  <Minus size={18} />
-                  扣除下单 (REMOVE)
+                  <Minus size={14} />
+                  扣除
                 </button>
               </div>
             </motion.div>
@@ -1710,7 +1755,7 @@ export default function App() {
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-white border-4 border-[#141414] p-6 max-w-sm w-full shadow-2xl"
             >
-              <h3 className="text-xl font-serif italic font-bold mb-4">确认撤销此笔业务？</h3>
+              <h3 className="text-xl font-serif italic font-bold mb-4">操作确认</h3>
               <div className="bg-gray-100 p-3 border-l-4 border-red-600 mb-6">
                 <span className="text-[10px] uppercase font-mono opacity-50 block mb-1">识别到的数据：</span>
                 <span className="text-sm font-mono font-bold text-red-600 break-words">{undoCallback?.label}</span>
@@ -1979,14 +2024,14 @@ export default function App() {
                       : 0;
 
                     return (
-                      <div key={record.id} className="group border-b border-dashed border-[#141414] border-opacity-20 pb-2 relative overflow-hidden bg-white/50 p-2 rounded">
+                      <div key={record.id} className="group border-b border-dashed border-[#141414] border-opacity-20 pb-2 relative overflow-hidden bg-white/50 p-2 rounded lottery-table">
                         <div className="flex justify-between items-start">
-                          <span className="text-[11px] font-mono opacity-60">{record.time}</span>
+                          <span className="text-[11pt] opacity-60">{record.time}</span>
                           <div className="flex items-center gap-2">
                             {winningAmount > 0 && (
-                              <span className="text-[11px] font-mono font-bold bg-yellow-400 px-1 rounded">中金: ¥{winningAmount}</span>
+                              <span className="text-[11pt] font-bold bg-yellow-400 px-1 rounded">中金: ¥{winningAmount}</span>
                             )}
-                            <span className={`text-sm font-mono font-bold ${record.totalAmount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            <span className={`text-[11pt] font-bold ${record.totalAmount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                               {record.totalAmount >= 0 ? '+' : ''}¥{record.totalAmount.toFixed(1)}
                             </span>
                             <button 
@@ -1998,9 +2043,9 @@ export default function App() {
                             </button>
                           </div>
                         </div>
-                        <p className="text-sm font-mono mt-1">{record.fullRaw || record.raw}</p>
+                        <p className="text-[11pt] font-serif font-bold mt-1 uppercase">{record.fullRaw || record.raw}</p>
                         {record.parsedPreview && (
-                          <div className="mt-1 p-1 bg-gray-50 text-[11px] font-mono opacity-60 whitespace-pre-wrap border-l-2 border-gray-200">
+                          <div className="mt-1 p-1 bg-gray-50 text-[11pt] font-serif font-bold opacity-60 whitespace-pre-wrap border-l-2 border-gray-200 uppercase">
                             {record.parsedPreview}
                           </div>
                         )}

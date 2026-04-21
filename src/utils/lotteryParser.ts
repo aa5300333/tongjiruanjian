@@ -341,14 +341,14 @@ function splitByAnchors(text: string): string[] {
     if (after.includes('到')) continue;
     
     // 如果是纯数字且 <= 49，且没有后缀，则忽略
-    const amountStr = match[2] || match[5];
+    const amountStr = match[2] || match[5] || match[7];
     const hasSuffix = !!match[3];
     if (!hasSuffix && /^\d+$/.test(amountStr)) {
       const val = parseInt(amountStr, 10);
       if (val <= 49) continue;
     }
     
-    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] || match[4] });
+    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] || match[4] || match[6] });
   }
 
   while ((match = implicitRegex.exec(text)) !== null) {

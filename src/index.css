@@ -4,11 +4,17 @@
   --font-sans: "SimSun", "宋体", "STSong", serif;
   --font-mono: "SimSun", "宋体", "STSong", monospace;
   --font-serif: "SimSun", "宋体", "STSong", serif;
+  --text-table: 11pt;
 }
 
 @layer base {
   html, body {
     @apply min-h-screen w-full;
     background-color: #E4E3E0;
+  }
+  
+  table, .lottery-table {
+    font-family: "SimSun", "宋体", "STSong", serif;
+    font-size: 11pt;
   }
 }
