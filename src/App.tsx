@@ -68,6 +68,14 @@ export default function App() {
     const saved = localStorage.getItem('enableSearchUndo');
     return saved === null ? true : saved === 'true'; // Default ON
   });
+  const [requireUndoConfirm, setRequireUndoConfirm] = useState<boolean>(() => {
+    const saved = localStorage.getItem('requireUndoConfirm');
+    return saved === null ? true : saved === 'true'; // Default ON
+  });
+  const [requireUndoPasteConfirm, setRequireUndoPasteConfirm] = useState<boolean>(() => {
+    const saved = localStorage.getItem('requireUndoPasteConfirm');
+    return saved === null ? true : saved === 'true'; // Default ON
+  });
   const [odds, setOdds] = useState<number>(() => {
     const saved = localStorage.getItem('odds');
     return saved ? parseFloat(saved) : 48.5;
@@ -88,6 +96,8 @@ export default function App() {
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
   const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
+  const [tempRequireUndoConfirm, setTempRequireUndoConfirm] = useState(requireUndoConfirm);
+  const [tempRequireUndoPasteConfirm, setTempRequireUndoPasteConfirm] = useState(requireUndoPasteConfirm);
   const [tempAppWidth, setTempAppWidth] = useState(appWidth);
   const [tempAppHeight, setTempAppHeight] = useState(appHeight);
 
@@ -97,10 +107,12 @@ export default function App() {
       setTempOdds(odds);
       setTempRebate(rebate);
       setTempEnableSearchUndo(enableSearchUndo);
+      setTempRequireUndoConfirm(requireUndoConfirm);
+      setTempRequireUndoPasteConfirm(requireUndoPasteConfirm);
       setTempAppWidth(appWidth);
       setTempAppHeight(appHeight);
     }
-  }, [isSettingsOpen, odds, rebate, enableSearchUndo, appWidth, appHeight]);
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm, appWidth, appHeight]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
@@ -133,6 +145,8 @@ export default function App() {
       if (e.key === 'compoundRecords') setCompoundRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'specialNumber') setSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
       if (e.key === 'enableSearchUndo') setEnableSearchUndo(e.newValue === 'true');
+      if (e.key === 'requireUndoConfirm') setRequireUndoConfirm(e.newValue === 'true');
+      if (e.key === 'requireUndoPasteConfirm') setRequireUndoPasteConfirm(e.newValue === 'true');
     };
 
     window.addEventListener('storage', handleStorageSync);
@@ -175,6 +189,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('enableSearchUndo', enableSearchUndo.toString());
   }, [enableSearchUndo]);
+  useEffect(() => {
+    localStorage.setItem('requireUndoConfirm', requireUndoConfirm.toString());
+  }, [requireUndoConfirm]);
+  useEffect(() => {
+    localStorage.setItem('requireUndoPasteConfirm', requireUndoPasteConfirm.toString());
+  }, [requireUndoPasteConfirm]);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modalInputRef = useRef<HTMLTextAreaElement>(null);
@@ -439,13 +459,17 @@ export default function App() {
     }
 
     if (targetRecord) {
-      setUndoCallback({ 
-        fn: () => {
-          handleUndo(targetRecord!.id);
-        }, 
-        label: `${targetRecord.raw}` 
-      });
-      setShowLastUndoConfirm(true);
+      if (requireUndoConfirm) {
+        setUndoCallback({ 
+          fn: () => {
+            handleUndo(targetRecord!.id);
+          }, 
+          label: `${targetRecord.raw}` 
+        });
+        setShowLastUndoConfirm(true);
+      } else {
+        handleUndo(targetRecord.id);
+      }
     } else {
       setError('没有可撤销的记录');
       setTimeout(() => setError(null), 2000);
@@ -455,14 +479,19 @@ export default function App() {
   const triggerUndoAndPaste = () => {
     const records = activeView === 'stats' ? financeRecords : compoundRecords;
     if (records.length > 0) {
-      setUndoCallback({ 
-        fn: async () => {
-          handleUndo(records[0].id);
-          await handlePasteAndRecognize();
-        }, 
-        label: `${records[0].raw}` 
-      });
-      setShowLastUndoConfirm(true);
+      if (requireUndoPasteConfirm) {
+        setUndoCallback({ 
+          fn: async () => {
+            handleUndo(records[0].id);
+            await handlePasteAndRecognize();
+          }, 
+          label: `${records[0].raw}` 
+        });
+        setShowLastUndoConfirm(true);
+      } else {
+        handleUndo(records[0].id);
+        handlePasteAndRecognize();
+      }
     } else {
       setError('没有可撤销的记录');
       setTimeout(() => setError(null), 2000);
@@ -1747,6 +1776,32 @@ export default function App() {
                       <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempEnableSearchUndo ? 'left-6' : 'left-1'}`} />
                     </button>
                   </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs font-mono font-bold uppercase tracking-widest block">开启撤销确认弹窗</label>
+                      <p className="text-[10px] font-mono opacity-40">开启后，点击“撤销”按钮时会弹出二次确认框。</p>
+                    </div>
+                    <button 
+                      onClick={() => setTempRequireUndoConfirm(!tempRequireUndoConfirm)}
+                      className={`w-10 h-5 rounded-full transition-colors relative ${tempRequireUndoConfirm ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempRequireUndoConfirm ? 'left-6' : 'left-1'}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs font-mono font-bold uppercase tracking-widest block">开启撤销并粘贴确认弹窗</label>
+                      <p className="text-[10px] font-mono opacity-40">开启后，点击“撤销并粘贴”按钮时会弹出二次确认框。</p>
+                    </div>
+                    <button 
+                      onClick={() => setTempRequireUndoPasteConfirm(!tempRequireUndoPasteConfirm)}
+                      className={`w-10 h-5 rounded-full transition-colors relative ${tempRequireUndoPasteConfirm ? 'bg-indigo-600' : 'bg-gray-300'}`}
+                    >
+                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempRequireUndoPasteConfirm ? 'left-6' : 'left-1'}`} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
@@ -1802,11 +1857,15 @@ export default function App() {
                     setOdds(tempOdds);
                     setRebate(tempRebate);
                     setEnableSearchUndo(tempEnableSearchUndo);
+                    setRequireUndoConfirm(tempRequireUndoConfirm);
+                    setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
                     setAppWidth(tempAppWidth);
                     setAppHeight(tempAppHeight);
                     localStorage.setItem('odds', tempOdds.toString());
                     localStorage.setItem('rebate', tempRebate.toString());
                     localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
+                    localStorage.setItem('requireUndoConfirm', tempRequireUndoConfirm.toString());
+                    localStorage.setItem('requireUndoPasteConfirm', tempRequireUndoPasteConfirm.toString());
                     localStorage.setItem('appWidth', tempAppWidth.toString());
                     localStorage.setItem('appHeight', tempAppHeight.toString());
                     setIsSettingsOpen(false);
