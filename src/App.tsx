@@ -58,6 +58,7 @@ export default function App() {
   });
   const [inputValue, setInputValue] = useState('');
   const [modalInputValue, setModalInputValue] = useState('');
+  const [lastSubmittedModalValue, setLastSubmittedModalValue] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -397,6 +398,7 @@ export default function App() {
       
       // setInputValue('');
       // setModalInputValue('');
+      setLastSubmittedModalValue(inputToParse);
       setError(null);
       modalInputRef.current?.focus();
     } catch (err) {
@@ -872,11 +874,19 @@ export default function App() {
           </div>
           
           <div className="grid grid-cols-2 gap-1 mt-1">
-            <button onClick={() => handleParse(false, modalInputValue)} disabled={!modalInputValue.trim()} className="bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50">
+            <button 
+              onClick={() => handleParse(false, modalInputValue)} 
+              disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue} 
+              className="bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
+            >
               <Plus size={18} />
               保存下单 (SAVE)
             </button>
-            <button onClick={() => handleParse(true, modalInputValue)} disabled={!modalInputValue.trim()} className="bg-red-600 hover:bg-red-700 text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50">
+            <button 
+              onClick={() => handleParse(true, modalInputValue)} 
+              disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue} 
+              className="bg-red-600 hover:bg-red-700 text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
+            >
               <Minus size={18} />
               扣除下单 (REMOVE)
             </button>
@@ -1670,16 +1680,16 @@ export default function App() {
               <div className="grid grid-cols-2 gap-1 mt-1">
                 <button 
                   onClick={() => handleParse(false, modalInputValue)}
-                  disabled={!modalInputValue.trim()}
-                  className="w-full bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-sm font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50"
+                  disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue}
+                  className="w-full bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-sm font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
                 >
                   <Plus size={18} />
                   保存下单 (SAVE)
                 </button>
                 <button 
                   onClick={() => handleParse(true, modalInputValue)}
-                  disabled={!modalInputValue.trim()}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white border border-red-600 py-4 text-sm font-bold transition-all active:bg-red-800 flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50"
+                  disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white border border-red-600 py-4 text-sm font-bold transition-all active:bg-red-800 flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
                 >
                   <Minus size={18} />
                   扣除下单 (REMOVE)
