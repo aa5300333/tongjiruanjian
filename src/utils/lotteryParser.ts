@@ -77,6 +77,12 @@ export interface ParseResult {
   banker?: number; // For 特碰
 }
 
+export const STRONG_KEYWORDS = [
+  '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', 'x', 'X', '￥'
+];
+export const WEAK_KEYWORDS = [':', '/', '：', '=', '＝', '号', '码'];
+export const ALL_KEYWORDS = [...STRONG_KEYWORDS, ...WEAK_KEYWORDS];
+
 /**
  * 将中文数字转换为阿拉伯数字 (支持到百位，满足金额需求)
  */
@@ -182,7 +188,7 @@ export function parseInput(input: string): ParseResult[] {
   
   // 扩充关键词库，涵盖所有对话中出现的变体
   const KEYWORDS = [
-    '每个', '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥', ':', '=', '/', 
+    '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', 'x', 'X', '￥', ':', '=', '/', 
     '：', '＝', '号', '码'
   ];
   const IGNORE_TARGETS = ['合计', '总计', '总共', '共计', '累计', '合计金额', '总额'];
@@ -228,7 +234,7 @@ export function parseInput(input: string): ParseResult[] {
     return match;
   });
 
-  const rawChunks = rangeProcessed.split(/[\n\r,，;；]+/).map(l => l.trim()).filter(l => l);
+  const rawChunks = rangeProcessed.split(/[\n\r;；]+/).map(l => l.trim()).filter(l => l);
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
@@ -301,10 +307,6 @@ export function parseInput(input: string): ParseResult[] {
  */
 function splitByAnchors(text: string): string[] {
   const segments: string[] = [];
-  const STRONG_KEYWORDS = [
-    '每个', '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥', '=', '＝', '号', '码'
-  ];
-  const WEAK_KEYWORDS = [':', '/', '：'];
   
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
@@ -315,18 +317,22 @@ function splitByAnchors(text: string): string[] {
   // 匹配强关键字：后面跟着数字即可
   const strongRegex = new RegExp(`(${strongPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])`, 'g');
   
-  // 匹配弱关键字：后面必须跟着 > 49 的数字，或者带有货币/计数后缀
-  const weakRegex = new RegExp(`(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])`, 'g');
+  // 匹配弱关键字：
+  // 1. 后面跟着币种后缀
+  // 2. 后面跟着 > 49 的数字
+  // 3. 后面跟着数字，且数字后紧跟记录分隔符（空格、逗号、分号、结句符号或行尾）
+  const weakRegex = new RegExp(`(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+)\\s*(?=[\\s,，、;；。]|$)`, 'g');
 
-  // 匹配隐式金额锚点：数字 > 49 且前面有力分隔符（或处于开头），且后面没有紧接其他数字或明确锚点关键字
+  // 匹配隐式金额锚点：数字 > 49 且前面有力分隔符（或处于开头），且后面没有紧接其他数字或明确锚点关键字/目标关键字
   // 这用于识别如 "龙蛇牛猴马100" 这种没有 "各" 的指令
-  const implicitRegex = /(?:^|[\s,，、；;。])(\d{2,})(?![.\d各字个每打买下xX￥=＝:：号码])/g;
+  // 修正：增加对“尾”、“到”、“拖”、“胆”等关键字的排除，防止“123尾”被切断
+  const implicitRegex = /(?:^|[\s,，、；;。])(\d{2,})(?![.\d各字个每打买下xX￥=＝:：号码尾到拖胆带中碰])/g;
 
-  const allMatches: { index: number, length: number }[] = [];
+  const allMatches: { index: number, length: number, keyword: string }[] = [];
   
   let match;
   while ((match = strongRegex.exec(text)) !== null) {
-    allMatches.push({ index: match.index, length: match[0].length });
+    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] });
   }
   
   while ((match = weakRegex.exec(text)) !== null) {
@@ -342,21 +348,42 @@ function splitByAnchors(text: string): string[] {
       if (val <= 49) continue;
     }
     
-    allMatches.push({ index: match.index, length: match[0].length });
+    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] || match[4] });
   }
 
   while ((match = implicitRegex.exec(text)) !== null) {
     const val = parseInt(match[1], 10);
     if (val > 49) {
-      allMatches.push({ index: match.index, length: match[0].length });
+      allMatches.push({ index: match.index, length: match[0].length, keyword: 'implicit' });
     }
   }
 
   // 按位置排序
   allMatches.sort((a, b) => a.index - b.index);
 
+  // 关键优化：过滤掉“冲突锚点”
+  // 如果一个号/码/：/等弱符号后面紧跟着另一个符号（且中间没有空格等强分隔符），说明它实际上是目标分隔符而非金额锚点
+  const filteredMatches: { index: number, length: number }[] = [];
+  for (let i = 0; i < allMatches.length; i++) {
+    const m = allMatches[i];
+    const nextM = allMatches[i + 1];
+    
+    if (nextM && (m.keyword === '号' || m.keyword === '码' || m.keyword === '/' || m.keyword === ':' || m.keyword === '：')) {
+      // 检查当前锚点结束到下一个锚点开始之间的文本
+      const gapText = text.substring(m.index + m.length, nextM.index);
+      // 如果中间只有数字和基础分隔符（逗号、句点），且没有明显的“记录边界”（如空格），则忽略当前这个弱锚点
+      // 例如 "11号12号" -> 中间是 "12"，将被忽略
+      // 例如 "11号,12号" -> 中间是 ",12"，符合条件，也将忽略
+      // 例如 "11号30 19号" -> 中间是 "30 19"，包含空格，则保留
+      if (/^[\s,，.、]*\d+[\s,，.、]*$/.test(gapText) && !gapText.includes(' ') && !gapText.includes('　')) {
+        continue;
+      }
+    }
+    filteredMatches.push(m);
+  }
+
   let lastIndex = 0;
-  for (const m of allMatches) {
+  for (const m of filteredMatches) {
     const anchorEnd = m.index + m.length;
     const segment = text.substring(lastIndex, anchorEnd).trim();
     if (segment) {
@@ -403,10 +430,6 @@ function splitByAnchors(text: string): string[] {
  * 解析单个指令段 (现在返回数组，支持如 "马龙各50" 拆分为两个结果)
  */
 function parseSegment(segment: string, keywords: string[], comboKeywords: string[]): ParseResult[] | null {
-  // 排序关键词，长的在前
-  const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
-  const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-
   // 识别连码类型
   let comboType: 'single' | '三中三' | '二中二' | '特碰' = 'single';
   const lowerSegment = segment.toLowerCase();
@@ -414,20 +437,47 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   else if (lowerSegment.includes('二中二') || lowerSegment.includes('2中2')) comboType = '二中二';
   else if (lowerSegment.includes('特碰')) comboType = '特碰';
 
-  // 允许关键词和金额之间有干扰字符，且金额后可能有后缀
-  // 修改：将开头的 (.*?) 改为 (.*) 贪婪匹配，确保在有多个关键词时（如 27/36/49各50）
-  // 能够优先匹配到最后一个有效的金额锚点（如 “各” 而不是第一个 “/”）
-  const regex = new RegExp(`^(.*)(?:${kwPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])(.*)$`);
-  const match = segment.match(regex);
-  
+  // 1. 寻找最佳金额锚点
+  // 规则：强度优先 (Strong > Weak)，位置优先 (Right-most)，长度优先 (Longer wins)
+  const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
+  const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const anchorRegex = new RegExp(`(${kwPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])`, 'g');
+
+  const matches: { keyword: string, amount: string, index: number, length: number, isStrong: boolean }[] = [];
+  let m;
+  while ((m = anchorRegex.exec(segment)) !== null) {
+    matches.push({
+      keyword: m[1],
+      amount: m[2],
+      index: m.index,
+      length: m[0].length,
+      isStrong: STRONG_KEYWORDS.includes(m[1])
+    });
+  }
+
+  let bestMatch = null;
+  if (matches.length > 0) {
+    // 排序逻辑：
+    // a) Strong 优先于 Weak
+    // b) 同时出发位置 (index) 越靠后越优先
+    // c) 如果 index 相同（由于是正则全局匹配，index 通常不同，但为了严谨），长度越长越优先
+    matches.sort((a, b) => {
+      if (a.isStrong !== b.isStrong) return b.isStrong ? 1 : -1;
+      if (a.index !== b.index) return b.index - a.index;
+      return b.length - a.length;
+    });
+    bestMatch = matches[0];
+  }
+
   let targetsStr = '';
   let amountStr = '';
-  
-  if (match) {
-    targetsStr = match[1].trim();
-    amountStr = match[2].trim();
+  let raw = segment;
+
+  if (bestMatch) {
+    targetsStr = segment.substring(0, bestMatch.index).trim();
+    amountStr = bestMatch.amount;
   } else {
-    // 兜底逻辑：找末尾数字
+    // 兜底逻辑：找末尾数字 (隐式指令)
     const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
     if (tailMatch) {
       targetsStr = tailMatch[1].trim();

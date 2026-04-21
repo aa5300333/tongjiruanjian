@@ -17,7 +17,8 @@ import {
   X,
   Settings,
   Minus,
-  Copy
+  Copy,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import XLSX from 'xlsx-js-style';
@@ -394,8 +395,8 @@ export default function App() {
         setFinanceRecords(prev => [ newRecord, ...prev ]);
       }
       
-      setInputValue('');
-      setModalInputValue('');
+      // setInputValue('');
+      // setModalInputValue('');
       setError(null);
       modalInputRef.current?.focus();
     } catch (err) {
@@ -538,8 +539,10 @@ export default function App() {
 
     if (activeBets.length === 0) return;
 
+    const totalAmount = activeBets.reduce((sum, [_, amount]) => sum + (amount as number), 0);
     const dataString = "上报散码数据:\n" + 
-      activeBets.map(([num, amount]) => `${num.padStart(2, '0')}=${(amount as number).toFixed(0)}`).join(' ');
+      activeBets.map(([num, amount]) => `${num.padStart(2, '0')}=${(amount as number).toFixed(0)}`).join(' ') +
+      `\n合计：${totalAmount.toFixed(0)}`;
 
     navigator.clipboard.writeText(dataString).then(() => {
       // Temporary visual feedback
@@ -1213,6 +1216,26 @@ export default function App() {
                     >
                       <Plus size={20} />
                       录入下注 (RECORD)
+                    </button>
+                  </div>
+                </section>
+
+                {/* Eat-Code Report Section */}
+                <section className="bg-white border border-[#141414] p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Upload size={16} />
+                      <h2 className="text-xs font-mono font-bold uppercase tracking-widest">报单系统</h2>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => alert('功能开发中...')}
+                      className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
+                    >
+                      <Upload size={20} />
+                      吃码上报
                     </button>
                   </div>
                 </section>
