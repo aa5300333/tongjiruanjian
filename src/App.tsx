@@ -912,7 +912,15 @@ export default function App() {
 
           <div className="grid grid-cols-5 gap-1 pt-2">
             <button onClick={handlePasteAndRecognize} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">粘贴识别</button>
-            <button onClick={() => modalInputRef.current?.focus()} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">重新识别</button>
+            <button 
+              onClick={() => {
+                modalInputRef.current?.focus();
+                setLastSubmittedModalValue('');
+              }} 
+              className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap"
+            >
+              重新识别
+            </button>
             <button onClick={() => setModalInputValue('')} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">清空</button>
             <button onClick={triggerLastUndo} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">撤销</button>
             <button onClick={triggerClearAndPaste} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap text-red-600">清空数据并粘贴</button>
@@ -1698,6 +1706,7 @@ export default function App() {
                 <button 
                   onClick={() => {
                     modalInputRef.current?.focus();
+                    setLastSubmittedModalValue('');
                   }}
                   className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
                 >
