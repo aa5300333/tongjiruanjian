@@ -1526,7 +1526,7 @@ export default function App() {
                 onPointerDown={(e) => dragControls.start(e)}
                 className="flex items-center justify-between border-b border-[#141414] pb-2 cursor-move select-none"
               >
-                <h3 className="text-2xl font-serif italic font-bold pointer-events-none">
+                <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest pointer-events-none">
                   智能下注录入
                 </h3>
                   <button 
@@ -1542,7 +1542,7 @@ export default function App() {
                 {/* Top Window: Input */}
                 <div className="flex-1 flex flex-col space-y-1 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-xl font-serif font-bold">需识别文字:</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字:</label>
                   </div>
                   <textarea
                     ref={modalInputRef}
@@ -1562,9 +1562,9 @@ export default function App() {
                 {/* Bottom Window: Display */}
                 <div className="flex-1 flex flex-col space-y-1 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-xl font-serif font-bold italic">识别的结果 (RESULT):</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别的结果 (RESULT):</label>
                     {modalInputValue.trim() && (
-                      <span className="text-sm font-mono font-bold text-blue-600">
+                      <span className="text-xl font-mono font-bold text-blue-600">
                         估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
                       </span>
                     )}

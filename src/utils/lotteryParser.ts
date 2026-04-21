@@ -146,9 +146,8 @@ export function parseInput(input: string): ParseResult[] {
   
   // 扩充关键词库，涵盖所有对话中出现的变体
   const KEYWORDS = [
-    '每个号码', '各个号码', '各号', '各码', '每个', '每号', '每码',
-    '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥', ':', '=', '/', 
-    '数', '号', '码', '号码', '：', '＝'
+    '每个', '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥', ':', '=', '/', 
+    '数', '：', '＝'
   ];
   const IGNORE_TARGETS = ['合计', '总计', '总共', '共计', '累计', '合计金额', '总额'];
   const HEADER_KEYWORDS = [
@@ -157,21 +156,28 @@ export function parseInput(input: string): ParseResult[] {
     '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报'
   ];
 
-  // 1. 移除汇总信息和报头信息
-  // 汇总信息通常带数字，报头通常不带或带无关数字
-  const sortedIgnore = [...IGNORE_TARGETS].sort((a, b) => b.length - a.length);
-  // 优化汇总正则：确保不会误删正常的投注项
-  const summaryRegex = new RegExp(`(?:${sortedIgnore.join('|')})[:：]?\\s*(?:共|额|金额)?\\s*\\d+\\s*元?(?![=：＝:各个字每打买下xX￥/])`, 'gi');
+  // 1. 识别库：处理已知的特殊模式或错误纠回
+  const RECOGNITION_LIBRARY: Array<{ pattern: RegExp, replacement: string | ((...args: any[]) => string) }> = [
+    // 修复 "01到12" 被冒号断开的问题：将 "门：01到12" 类型的标签冒号暂时移位或移除
+    { pattern: /门[：:](?=\d)/g, replacement: '门 ' },
+  ];
+
+  let preProcessed = input;
+  RECOGNITION_LIBRARY.forEach(rec => {
+    preProcessed = preProcessed.replace(rec.pattern, rec.replacement as any);
+  });
   
-  // 优化报头正则：只匹配行首或明显分隔符后的报头，防止误伤
+  // 2. 移除汇总信息和报头信息
+  const sortedIgnore = [...IGNORE_TARGETS].sort((a, b) => b.length - a.length);
+  const summaryRegex = new RegExp(`(?:${sortedIgnore.join('|')})[:：]?\\s*(?:共|额|金额)?\\s*\\d+\\s*元?(?![=：＝:各个字每打买下xX￥/])`, 'gi');
   const headerRegex = new RegExp(`(?:^|[\\s。，,])(?:${HEADER_KEYWORDS.sort((a, b) => b.length - a.length).join('|')})[:：]?`, 'gi');
   
-  let cleanedInput = processed.replace(summaryRegex, '');
+  let cleanedInput = preProcessed.replace(summaryRegex, '');
   cleanedInput = cleanedInput.replace(headerRegex, ' ');
 
-  // 2. 处理跨行指令，并在特定情况下转换 "-"
+  // 3. 处理跨行指令，并在特定情况下转换 "-"
   // 逻辑：如果输入包含 "18-100" 这种格式，且 "-" 后的数字大于 49，则将其转换为 "18各100"
-  let preProcessed = cleanedInput.replace(/(\d+)\s*-\s*(\d+)(?![-\d])/g, (match, p1, p2) => {
+  let rangeProcessed = cleanedInput.replace(/(\d+)\s*-\s*(\d+)(?![-\d])/g, (match, p1, p2) => {
     const num = parseInt(p1, 10);
     const amount = parseInt(p2, 10);
     if (num <= 49 && amount > 49) {
@@ -180,13 +186,13 @@ export function parseInput(input: string): ParseResult[] {
     return match;
   });
 
-  const unifiedInput = preProcessed.split(/[\n\r]+/).map(l => l.trim()).filter(l => l).join(' ');
+  const unifiedInput = rangeProcessed.split(/[\n\r]+/).map(l => l.trim()).filter(l => l).join(' ');
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
   
   // 3. 使用“金额锚点”逻辑进行切分
-  const segments = splitByAnchors(unifiedInput, KEYWORDS);
+  const segments = splitByAnchors(unifiedInput);
   
   for (const segment of segments) {
     const results = parseSegment(segment, KEYWORDS, COMBO_KEYWORDS);
@@ -202,23 +208,54 @@ export function parseInput(input: string): ParseResult[] {
  * 金额锚点切分算法
  * 寻找所有可能的金额点，并将之前的文本归为该金额的目标
  */
-function splitByAnchors(text: string, keywords: string[]): string[] {
+function splitByAnchors(text: string): string[] {
   const segments: string[] = [];
+  const STRONG_KEYWORDS = [
+    '每个', '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥'
+  ];
+  const WEAK_KEYWORDS = [':', '=', '/', '：', '＝'];
   
-  // 排序关键词，长的在前，防止短的拦截长的
-  const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
-  const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
+  const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   
-  // 匹配模式：(关键词) (可选干扰) (数字) (元/米/斤等可选后缀)
-  // 关键修复：将负向先行断言移动到后缀之后，防止后缀中的字符（如“一个”中的“一”）触发断言失败
-  const anchorRegex = new RegExp(`(?:${kwPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])`, 'g');
+  const sortedWeak = [...WEAK_KEYWORDS].sort((a, b) => b.length - a.length);
+  const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+
+  // 匹配强关键字：后面跟着数字即可
+  const strongRegex = new RegExp(`(${strongPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])`, 'g');
   
-  let lastIndex = 0;
+  // 匹配弱关键字：后面必须跟着 > 49 的数字，或者带有货币/计数后缀
+  const weakRegex = new RegExp(`(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])`, 'g');
+
+  const allMatches: { index: number, length: number }[] = [];
+  
   let match;
+  while ((match = strongRegex.exec(text)) !== null) {
+    allMatches.push({ index: match.index, length: match[0].length });
+  }
   
-  while ((match = anchorRegex.exec(text)) !== null) {
-    const anchorEnd = anchorRegex.lastIndex;
-    // 截取从上一个锚点结束到当前锚点结束的所有内容
+  while ((match = weakRegex.exec(text)) !== null) {
+    // 对于弱匹配，如果后面紧跟“到”，则忽略（可能是范围：12:15到20）
+    const after = text.substring(match.index + match[0].length, match.index + match[0].length + 5);
+    if (after.includes('到')) continue;
+    
+    // 如果是纯数字且 <= 49，且没有后缀，则忽略
+    const amountStr = match[2] || match[5];
+    const hasSuffix = !!match[3];
+    if (!hasSuffix && /^\d+$/.test(amountStr)) {
+      const val = parseInt(amountStr, 10);
+      if (val <= 49) continue;
+    }
+    
+    allMatches.push({ index: match.index, length: match[0].length });
+  }
+
+  // 按位置排序
+  allMatches.sort((a, b) => a.index - b.index);
+
+  let lastIndex = 0;
+  for (const m of allMatches) {
+    const anchorEnd = m.index + m.length;
     const segment = text.substring(lastIndex, anchorEnd).trim();
     if (segment) {
       segments.push(segment);
@@ -232,7 +269,19 @@ function splitByAnchors(text: string, keywords: string[]): string[] {
     if (/\d+|[一二三四五六七八九十百]+/.test(remaining)) {
       const implicitMatch = remaining.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
       if (implicitMatch) {
-        segments.push(remaining);
+        // 隐式匹配也需要校验：如果是弱分割（空格），数字应 > 49
+        const valStr = implicitMatch[2];
+        let isValid = true;
+        if (/^\d+$/.test(valStr)) {
+          const val = parseInt(valStr, 10);
+          if (val <= 49) isValid = false;
+        }
+        
+        if (isValid) {
+          segments.push(remaining);
+        } else if (segments.length > 0) {
+          segments[segments.length - 1] += ' ' + remaining;
+        }
       } else if (segments.length > 0) {
         segments[segments.length - 1] += ' ' + remaining;
       }
@@ -375,13 +424,26 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   } else {
     // 特码逻辑：收集该段内所有的号码
     const allNumbers: number[] = [];
-    let remainingStr = targetsStr; // 用于提取独立数字的剩余字符串
+    
+    // 保护包含关键字的特殊组合 (如 '字', '数')，防止被后续的干扰词移除逻辑误删
+    const PROTECTED_COMBOS = ['倒反数', '反数', '反字', '大数', '小数'];
+    let protectedStr = targetsStr;
+    PROTECTED_COMBOS.forEach((p, idx) => {
+      protectedStr = protectedStr.replace(new RegExp(p, 'g'), `__PC_${idx}__`);
+    });
+
+    let remainingStr = protectedStr; // 用于提取独立数字的剩余字符串
 
     // 预处理：移除 targetsStr 中可能存在的干扰关键词 (如“号码”、“每个”)
     const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
     sortedKws.forEach(kw => {
       const kwRegex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
       remainingStr = remainingStr.replace(kwRegex, ' ');
+    });
+
+    // 还原被保护的特殊组合
+    PROTECTED_COMBOS.forEach((p, idx) => {
+      remainingStr = remainingStr.replace(new RegExp(`__PC_${idx}__`, 'g'), p);
     });
 
     let displayRaw = cleanDisplayRaw(targetsStr);
