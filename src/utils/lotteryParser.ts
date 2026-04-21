@@ -357,15 +357,16 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     return normalized
       .replace(whitelist, ' ')                    // 不在白名单内的全部替换为空格
-      .replace(/(\d+)/g, ' $1 ')                  // 确保数字前后有空格，便于补零
+      .replace(/(\d+)(?!尾)/g, ' $1 ')             // 确保普通数字前后有空格，便于补零，但排除“尾”前的数字
+      .replace(/(\d+尾)/g, ' $1 ')                // 确保“X尾”作为一个整体前后有空格
       .replace(/\s+/g, ' ')                       // 合并多个空格
       .trim()
       .split(' ')
       .flatMap(part => {
-        // 如果是 "3尾" 这种格式，尝试补齐数字
+        // 如果是 "3尾" 这种格式，直接返回，不补零
         const tailMatch = part.match(/^(\d+)尾$/);
         if (tailMatch) {
-          return [tailMatch[1].padStart(2, '0') + '尾'];
+          return [tailMatch[1] + '尾'];
         }
 
         if (/^\d+$/.test(part)) {

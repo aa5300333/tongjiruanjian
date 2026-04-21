@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "com.lottery.manager",
-    "productName": "六合彩财务智能统计软件",
+    "productName": "财务智能统计软件",
     "directories": {
       "output": "release"
     },
