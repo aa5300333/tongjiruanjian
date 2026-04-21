@@ -153,7 +153,8 @@ export function parseInput(input: string): ParseResult[] {
   const HEADER_KEYWORDS = [
     '新澳门', '澳门特码', '新奥特码', '澳门特', '澳门', '特码', '澳特', '特',
     '上报数据明细', '数据明细', '明细', '报单', '报单明细', '清单', '下注清单',
-    '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报'
+    '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报',
+    'Vz-HuiPu-PC', '图', '港'
   ];
 
   // 1. 识别库：处理已知的特殊模式或错误纠回
@@ -211,9 +212,9 @@ export function parseInput(input: string): ParseResult[] {
 function splitByAnchors(text: string): string[] {
   const segments: string[] = [];
   const STRONG_KEYWORDS = [
-    '每个', '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥'
+    '每个', '各', '个', '字', '每', '打', '买', '下', 'x', 'X', '￥', '=', '＝'
   ];
-  const WEAK_KEYWORDS = [':', '=', '/', '：', '＝'];
+  const WEAK_KEYWORDS = [':', '/', '：'];
   
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
