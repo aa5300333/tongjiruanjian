@@ -990,9 +990,13 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
-      {/* Sidebar Navigation */}
-      <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
+    <div className="min-h-screen w-full bg-gray-900/5 flex items-center justify-center overflow-auto p-8">
+      <div 
+        style={{ width: `${appWidth}px`, height: `${appHeight}px` }}
+        className="bg-white text-[#141414] font-sans flex overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.15)] border border-gray-200 flex-shrink-0 relative"
+      >
+        {/* Sidebar Navigation */}
+        <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
           <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
@@ -2082,6 +2086,7 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }
