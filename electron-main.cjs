@@ -3,12 +3,12 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 850,
-    minWidth: 1000,
-    minHeight: 750,
+    width: 1400,
+    height: 1200, // Increased for full screenshots
+    minWidth: 1400,
+    minHeight: 1200,
+    resizable: false, // Fixed for screenshot consistency
     title: "财务智能统计软件",
-    resizable: true,
     icon: path.join(__dirname, 'dist/favicon.ico'), // 如果有图标的话
     webPreferences: {
       nodeIntegration: false,

@@ -1330,7 +1330,7 @@ export default function App() {
                     <h2 className="text-[10px] font-mono font-bold uppercase tracking-widest">风险值预警排名 (由亏到赚)</h2>
                   </div>
 
-                  <div className="flex-1 space-y-0 pr-1 overflow-y-auto">
+                  <div className="flex-1 space-y-0 pr-1">
                     {(() => {
                       const totalNet = financeRecords.reduce((sum, rec) => {
                         const recGross = rec.items.reduce((s, item) => s + (item.amount * item.targets.length), 0);
@@ -1350,7 +1350,7 @@ export default function App() {
                           <div 
                             key={item.num} 
                             className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
-                            style={{ height: '17px' }}
+                            style={{ height: '20px' }}
                           >
                             <div className="flex items-center gap-1 leading-none">
                               <span className={`text-[11pt] font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
