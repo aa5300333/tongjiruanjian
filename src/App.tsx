@@ -88,11 +88,11 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1120;
+    return saved ? parseInt(saved) : 1425;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 865;
+    return saved ? parseInt(saved) : 864;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -990,9 +990,14 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
-      {/* Sidebar Navigation */}
-      <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
+    <div className="h-screen w-screen bg-[#E4E3E0] text-[#141414] font-sans flex items-center justify-center overflow-auto p-4">
+      {/* Simulation of the Window Frame based on settings */}
+      <div 
+        className="bg-white flex shadow-2xl border border-gray-300 overflow-hidden relative"
+        style={{ width: `${appWidth}px`, height: `${appHeight}px`, minWidth: `${appWidth}px`, minHeight: `${appHeight}px` }}
+      >
+        {/* Sidebar Navigation */}
+        <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
           <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
@@ -1611,12 +1616,12 @@ export default function App() {
               </div>
             </>
           )}
-            </div>
           </div>
         </div>
-      </main>
+      </div>
+    </main>
 
-      {/* Data Entry Modal */}
+    {/* Data Entry Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-transparent border-4 border-[#141414]/5 ring-1 ring-inset ring-white/20">
@@ -1911,6 +1916,37 @@ export default function App() {
                     onClick={() => {
                       setTempAppWidth(1120);
                       setTempAppHeight(865);
+                      
+                      // Apply immediately as requested
+                      setAppWidth(1120);
+                      setAppHeight(865);
+                      localStorage.setItem('appWidth', '1120');
+                      localStorage.setItem('appHeight', '865');
+                      
+                      // Notify Electron if running locally
+                      try {
+                        // @ts-ignore
+                        if (window.require) {
+                          // @ts-ignore
+                          const fs = window.require('fs');
+                          // @ts-ignore
+                          const path = window.require('path');
+                          // @ts-ignore
+                          const electron = window.require('electron');
+                          // @ts-ignore
+                          const userDataPath = (electron.app || (electron.remote && electron.remote.app)).getPath('userData');
+                          
+                          if (fs && userDataPath) {
+                            const configPath = path.join(userDataPath, 'config.json');
+                            fs.writeFileSync(configPath, JSON.stringify({ width: 1120, height: 865 }), 'utf8');
+                            
+                            // Also try to resize immediate if in electron
+                            // @ts-ignore
+                            const win = (electron.remote && electron.remote.getCurrentWindow()) || null;
+                            if (win) win.setSize(1120, 865);
+                          }
+                        }
+                      } catch(e) {}
                     }}
                     className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
                   >
@@ -1949,6 +1985,32 @@ export default function App() {
                     localStorage.setItem('requireUndoPasteConfirm', tempRequireUndoPasteConfirm.toString());
                     localStorage.setItem('appWidth', tempAppWidth.toString());
                     localStorage.setItem('appHeight', tempAppHeight.toString());
+
+                    // Save to config.json for Electron persistence
+                    try {
+                      // @ts-ignore
+                      if (window.require) {
+                        // @ts-ignore
+                        const fs = window.require('fs');
+                        // @ts-ignore
+                        const path = window.require('path');
+                        // @ts-ignore
+                        const electron = window.require('electron');
+                        // @ts-ignore
+                        const userDataPath = (electron.app || (electron.remote && electron.remote.app)).getPath('userData');
+                        
+                        if (fs && userDataPath) {
+                          const configPath = path.join(userDataPath, 'config.json');
+                          fs.writeFileSync(configPath, JSON.stringify({ width: tempAppWidth, height: tempAppHeight }), 'utf8');
+                          
+                          // Also try to resize immediate if in electron
+                          // @ts-ignore
+                          const win = (electron.remote && electron.remote.getCurrentWindow()) || null;
+                          if (win) win.setSize(tempAppWidth, tempAppHeight);
+                        }
+                      }
+                    } catch (e) {}
+
                     setIsSettingsOpen(false);
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"
@@ -2089,6 +2151,7 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+  </div>
   );
 }
 

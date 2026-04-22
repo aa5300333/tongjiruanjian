@@ -1,20 +1,35 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 function createWindow() {
+  // Load config from local file if exists
+  let config = { width: 1425, height: 864 };
+  const configPath = path.join(app.getPath('userData'), 'config.json');
+  
+  try {
+    if (fs.existsSync(configPath)) {
+      const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      config.width = savedConfig.width || config.width;
+      config.height = savedConfig.height || config.height;
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e);
+  }
+
   const win = new BrowserWindow({
-    width: 1400,
-    height: 1200, // Increased for full screenshots
-    minWidth: 1400,
-    minHeight: 1200,
-    resizable: false, // Fixed for screenshot consistency
+    width: config.width,
+    height: config.height,
+    minWidth: 1000,
+    minHeight: 750,
+    resizable: true,
     title: "财务智能统计软件",
-    icon: path.join(__dirname, 'dist/favicon.ico'), // 如果有图标的话
+    icon: path.join(__dirname, 'dist/favicon.ico'),
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
+      nodeIntegration: true, // Enabled for direct config file access as requested
+      contextIsolation: false,
     },
-    autoHideMenuBar: true, // 隐藏上方菜单栏
+    autoHideMenuBar: true,
   });
 
   // 优先加载打包后的文件
