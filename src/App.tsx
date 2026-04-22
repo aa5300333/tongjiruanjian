@@ -86,22 +86,12 @@ export default function App() {
     const saved = localStorage.getItem('rebate');
     return saved ? parseFloat(saved) : 4;
   });
-  const [appWidth, setAppWidth] = useState<number>(() => {
-    const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1425;
-  });
-  const [appHeight, setAppHeight] = useState<number>(() => {
-    const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 864;
-  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
   const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
   const [tempRequireUndoConfirm, setTempRequireUndoConfirm] = useState(requireUndoConfirm);
   const [tempRequireUndoPasteConfirm, setTempRequireUndoPasteConfirm] = useState(requireUndoPasteConfirm);
-  const [tempAppWidth, setTempAppWidth] = useState(appWidth);
-  const [tempAppHeight, setTempAppHeight] = useState(appHeight);
 
   // Initialize temp states when settings opens
   useEffect(() => {
@@ -111,10 +101,8 @@ export default function App() {
       setTempEnableSearchUndo(enableSearchUndo);
       setTempRequireUndoConfirm(requireUndoConfirm);
       setTempRequireUndoPasteConfirm(requireUndoPasteConfirm);
-      setTempAppWidth(appWidth);
-      setTempAppHeight(appHeight);
     }
-  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm, appWidth, appHeight]);
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
@@ -990,14 +978,9 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-[#E4E3E0] text-[#141414] font-sans flex items-center justify-center overflow-auto p-4">
-      {/* Simulation of the Window Frame based on settings */}
-      <div 
-        className="bg-white flex shadow-2xl border border-gray-300 overflow-hidden relative"
-        style={{ width: `${appWidth}px`, height: `${appHeight}px`, minWidth: `${appWidth}px`, minHeight: `${appHeight}px` }}
-      >
-        {/* Sidebar Navigation */}
-        <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
+    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
+      {/* Sidebar Navigation */}
+      <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
           <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
@@ -1616,12 +1599,12 @@ export default function App() {
               </div>
             </>
           )}
+            </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
 
-    {/* Data Entry Modal */}
+      {/* Data Entry Modal */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-transparent border-4 border-[#141414]/5 ring-1 ring-inset ring-white/20">
@@ -1890,71 +1873,6 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-4 pt-2 border-t border-gray-100">
-                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">宽</span>
-                      <input 
-                        type="number" 
-                        value={tempAppWidth}
-                        onChange={(e) => setTempAppWidth(parseInt(e.target.value) || 0)}
-                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
-                      />
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">高</span>
-                      <input 
-                        type="number" 
-                        value={tempAppHeight}
-                        onChange={(e) => setTempAppHeight(parseInt(e.target.value) || 0)}
-                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setTempAppWidth(1120);
-                      setTempAppHeight(865);
-                      
-                      // Apply immediately as requested
-                      setAppWidth(1120);
-                      setAppHeight(865);
-                      localStorage.setItem('appWidth', '1120');
-                      localStorage.setItem('appHeight', '865');
-                      
-                      // Notify Electron if running locally
-                      try {
-                        // @ts-ignore
-                        if (window.require) {
-                          // @ts-ignore
-                          const fs = window.require('fs');
-                          // @ts-ignore
-                          const path = window.require('path');
-                          // @ts-ignore
-                          const electron = window.require('electron');
-                          // @ts-ignore
-                          const userDataPath = (electron.app || (electron.remote && electron.remote.app)).getPath('userData');
-                          
-                          if (fs && userDataPath) {
-                            const configPath = path.join(userDataPath, 'config.json');
-                            fs.writeFileSync(configPath, JSON.stringify({ width: 1120, height: 865 }), 'utf8');
-                            
-                            // Also try to resize immediate if in electron
-                            // @ts-ignore
-                            const win = (electron.remote && electron.remote.getCurrentWindow()) || null;
-                            if (win) win.setSize(1120, 865);
-                          }
-                        }
-                      } catch(e) {}
-                    }}
-                    className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
-                  >
-                    一键设置推荐分辨率 (1120 x 865)
-                  </button>
-                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
-                </div>
-
                 <div className="space-y-2 pt-2 border-t border-gray-100">
                   <label className="text-xs font-mono font-bold uppercase tracking-widest block text-blue-600">高级：多窗口录入助手</label>
                   <a 
@@ -1976,41 +1894,11 @@ export default function App() {
                     setEnableSearchUndo(tempEnableSearchUndo);
                     setRequireUndoConfirm(tempRequireUndoConfirm);
                     setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
-                    setAppWidth(tempAppWidth);
-                    setAppHeight(tempAppHeight);
                     localStorage.setItem('odds', tempOdds.toString());
                     localStorage.setItem('rebate', tempRebate.toString());
                     localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
                     localStorage.setItem('requireUndoConfirm', tempRequireUndoConfirm.toString());
                     localStorage.setItem('requireUndoPasteConfirm', tempRequireUndoPasteConfirm.toString());
-                    localStorage.setItem('appWidth', tempAppWidth.toString());
-                    localStorage.setItem('appHeight', tempAppHeight.toString());
-
-                    // Save to config.json for Electron persistence
-                    try {
-                      // @ts-ignore
-                      if (window.require) {
-                        // @ts-ignore
-                        const fs = window.require('fs');
-                        // @ts-ignore
-                        const path = window.require('path');
-                        // @ts-ignore
-                        const electron = window.require('electron');
-                        // @ts-ignore
-                        const userDataPath = (electron.app || (electron.remote && electron.remote.app)).getPath('userData');
-                        
-                        if (fs && userDataPath) {
-                          const configPath = path.join(userDataPath, 'config.json');
-                          fs.writeFileSync(configPath, JSON.stringify({ width: tempAppWidth, height: tempAppHeight }), 'utf8');
-                          
-                          // Also try to resize immediate if in electron
-                          // @ts-ignore
-                          const win = (electron.remote && electron.remote.getCurrentWindow()) || null;
-                          if (win) win.setSize(tempAppWidth, tempAppHeight);
-                        }
-                      }
-                    } catch (e) {}
-
                     setIsSettingsOpen(false);
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"
@@ -2151,7 +2039,6 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
-  </div>
   );
 }
 
