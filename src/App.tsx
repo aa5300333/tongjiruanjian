@@ -88,28 +88,12 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1125;
+    return saved ? parseInt(saved) : 1120;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 864;
+    return saved ? parseInt(saved) : 865;
   });
-
-  const [windowSize, setWindowSize] = useState({ 
-    width: typeof window !== 'undefined' ? window.innerWidth : 1125, 
-    height: typeof window !== 'undefined' ? window.innerHeight : 864 
-  });
-
-  useEffect(() => {
-    const handleResize = () => {
-      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const scaleX = windowSize.width / 1125;
-  const scaleY = windowSize.height / 864;
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
@@ -1006,102 +990,96 @@ export default function App() {
   }
 
   return (
-    <div 
-      style={{ 
-        width: '100vw', 
-        height: '100vh', 
-        overflow: 'hidden', 
-        backgroundColor: '#E4E3E0',
-        position: 'fixed',
-        top: 0,
-        left: 0
-      }}
-    >
-      <div
-        style={{
-          width: '1125px',
-          height: '864px',
-          transform: `scale(${scaleX}, ${scaleY})`,
-          transformOrigin: 'top left',
-          position: 'absolute',
-          top: 0,
-          left: 0
-        }}
-        className="text-[#141414] font-sans selection:bg-blue-100"
-      >
-        <div className="min-h-full p-2 md:p-4 overflow-hidden flex flex-col">
-      <div 
-        className="mx-auto space-y-4"
-        style={{ width: `${appWidth}px`, minWidth: `${appWidth}px` }}
-      >
+    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
+      {/* Sidebar Navigation */}
+      <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
+          <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
+        </div>
+        
+        <nav className="flex-1 p-3 space-y-2">
+          <div className="space-y-1">
+            <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">主要功能</label>
+            <button 
+              onClick={() => setActiveView('stats')}
+              className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+            >
+              <Calculator size={18} />
+              <span className="text-sm font-bold">财务统计</span>
+            </button>
+            <button 
+              onClick={() => setActiveView('compound')}
+              className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+            >
+              <TrendingUp size={18} />
+              <span className="text-sm font-bold">复式管理</span>
+            </button>
+          </div>
+
+          <div className="pt-4 space-y-1">
+            <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">数据操作</label>
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-black/5 transition-all"
+            >
+              <Settings size={18} />
+              <span className="text-sm font-bold">系统设置</span>
+            </button>
+            <button 
+              onClick={handleExport}
+              className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 transition-all"
+            >
+              <Download size={18} />
+              <span className="text-sm font-bold">导出报表</span>
+            </button>
+            <button 
+              onClick={() => setShowResetConfirm(true)}
+              className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-red-50 text-red-700 hover:text-red-800 transition-all"
+            >
+              <RotateCcw size={18} />
+              <span className="text-sm font-bold">一键清零</span>
+            </button>
+          </div>
+        </nav>
+
+        <div className="p-4 border-t border-gray-200">
+           <div className="flex items-center gap-2 mb-3">
+              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <span className="text-[10px] font-mono font-bold opacity-70">系统在线</span>
+           </div>
+           <div className="text-[10px] font-mono opacity-30">
+              © 2026 LOTTERY SYSTEM
+           </div>
+        </div>
+      </aside>
+
+      {/* Main Workspace Frame */}
+      <main className="flex-1 flex flex-col min-w-0 bg-white">
         {error && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-red-50 border border-red-200 p-3 flex items-center justify-between"
+            className="bg-red-50 border-b border-red-200 p-3 flex items-center justify-between"
           >
-            <div className="flex items-center gap-3 text-red-700">
+            <div className="flex items-center gap-3 text-red-700 font-bold">
               <AlertCircle size={18} />
-              <span className="text-sm font-mono font-bold uppercase tracking-tight">{error}</span>
+              <span className="text-sm font-mono uppercase tracking-tight">{error}</span>
             </div>
             <button onClick={() => setError(null)} className="p-1 hover:bg-red-100 text-red-600 transition-colors">
               <X size={16} />
             </button>
           </motion.div>
         )}
-        {/* Compact Header & Tabs Row - REMOVED for space saving */}
-        
-        <main className="flex flex-col lg:flex-row gap-1">
-          {/* Vertical Sidebar Navigation */}
-          <nav className="flex lg:flex-col flex-row gap-1 w-full lg:w-10 mb-1 lg:mb-0">
-            <button 
-              onClick={() => setActiveView('stats')}
-              className={`flex-1 lg:flex-none h-10 lg:h-24 flex lg:flex-col items-center justify-center gap-1 border border-[#141414] transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white' : 'bg-white hover:bg-black/5'}`}
-              title="财务统计"
-            >
-              <Calculator size={18} />
-              <span className="text-[10px] font-bold lg:[writing-mode:vertical-rl]">财务统计</span>
-            </button>
-            <button 
-              onClick={() => setActiveView('compound')}
-              className={`flex-1 lg:flex-none h-10 lg:h-24 flex lg:flex-col items-center justify-center gap-1 border border-[#141414] transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white' : 'bg-white hover:bg-black/5'}`}
-              title="复式管理"
-            >
-              <TrendingUp size={18} />
-              <span className="text-[10px] font-bold lg:[writing-mode:vertical-rl]">复式管理</span>
-            </button>
-            <div className="flex flex-row lg:flex-col gap-1 flex-1 lg:flex-none">
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-[#141414] hover:text-[#E4E3E0] transition-colors"
-                title="设置"
-              >
-                <Settings size={18} />
-              </button>
-              <button 
-                onClick={() => setShowResetConfirm(true)}
-                className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-red-600 hover:text-white transition-colors"
-                title="一键清零"
-              >
-                <RotateCcw size={18} />
-              </button>
-              <button 
-                onClick={handleExport}
-                className="flex-1 lg:flex-none h-10 lg:h-12 flex items-center justify-center border border-[#141414] bg-white hover:bg-emerald-600 hover:text-white transition-colors"
-                title="导出记录"
-              >
-                <Download size={18} />
-              </button>
-            </div>
-          </nav>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-1 flex-1">
+        <div className="flex-1 overflow-hidden p-4">
+          <div className="h-full flex flex-col gap-4">
+            <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
           {activeView === 'stats' ? (
             <>
               {/* Left Column: Number Distribution Matrix */}
               <div 
-                className="lg:col-span-6 space-y-1"
-                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+                className="lg:col-span-6 flex flex-col h-full min-h-0"
               >
                 <section className="bg-white border border-[#141414] p-4 h-full flex flex-col overflow-hidden">
                   <div className="flex flex-col gap-1 mb-4">
@@ -1296,8 +1274,7 @@ export default function App() {
 
               {/* Middle Column: Input & History & Settings */}
               <div 
-                className="lg:col-span-3 space-y-1"
-                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+                className="lg:col-span-3 flex flex-col gap-4 h-full min-h-0"
               >
                 {/* Input Section */}
                 <section className="bg-white border border-[#141414] p-4">
@@ -1345,8 +1322,7 @@ export default function App() {
 
               {/* Right Column: Risk Analysis (Vertical List) */}
               <div 
-                className="lg:col-span-3 space-y-1"
-                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+                className="lg:col-span-3 flex flex-col h-full min-h-0"
               >
                 <section className="bg-white border border-[#141414] flex flex-col h-full">
                   <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-100 bg-gray-50/50">
@@ -1397,8 +1373,7 @@ export default function App() {
             <>
               {/* Compound Management View */}
               <div 
-                className="lg:col-span-4 space-y-1"
-                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+                className="lg:col-span-4 flex flex-col gap-4 h-full min-h-0"
               >
                 {/* Opening Results Section */}
                 <section className="bg-white border border-[#141414] p-4">
@@ -1493,8 +1468,7 @@ export default function App() {
               </div>
 
               <div 
-                className="lg:col-span-8 space-y-4"
-                style={{ height: `${appHeight}px`, minHeight: `${appHeight}px` }}
+                className="lg:col-span-8 flex flex-col h-full min-h-0"
               >
                 <section className="bg-white border border-[#141414] p-4 flex flex-col h-full min-h-[400px]">
                   <div className="flex items-center justify-between mb-4">
@@ -1637,29 +1611,10 @@ export default function App() {
               </div>
             </>
           )}
-          </div>
-        </main>
-
-        {/* Footer Info */}
-        <footer className="pt-8 border-t border-[#141414] border-opacity-10 flex flex-col md:flex-row justify-between gap-4">
-          <div className="flex gap-6">
-            <div className="space-y-1">
-              <span className="text-[10px] font-mono opacity-50 uppercase block">System Status</span>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-mono font-bold">READY • REAL-TIME SYNC ACTIVE</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <span className="text-[10px] font-mono opacity-50 uppercase block">Data Integrity</span>
-              <span className="text-[10px] font-mono font-bold">VERIFIED • REGEX PARSER V2.4</span>
             </div>
           </div>
-          <div className="text-[10px] font-mono opacity-30 text-right">
-            © 2026 LOTTERY FINANCIAL INTELLIGENCE SYSTEM. ALL RIGHTS RESERVED.
-          </div>
-        </footer>
-      </div>
+        </div>
+      </main>
 
       {/* Data Entry Modal */}
       <AnimatePresence>
@@ -1954,14 +1909,14 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => {
-                      setTempAppWidth(1125);
-                      setTempAppHeight(864);
+                      setTempAppWidth(1120);
+                      setTempAppHeight(865);
                     }}
                     className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    一键设置推荐分辨率 (1125 x 864)
+                    一键设置推荐分辨率 (1120 x 865)
                   </button>
-                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。本软件强制尺寸为 1325x864。</span></p>
+                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">
@@ -2133,8 +2088,6 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-        </div>
-      </div>
     </div>
   );
 }

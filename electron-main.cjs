@@ -3,17 +3,18 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1325,
-    height: 964,
-    useContentSize: true,
+    width: 1200,
+    height: 850,
+    minWidth: 1000,
+    minHeight: 750,
     title: "财务智能统计软件",
     resizable: true,
-    icon: path.join(__dirname, 'dist/favicon.ico'),
+    icon: path.join(__dirname, 'dist/favicon.ico'), // 如果有图标的话
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
-    autoHideMenuBar: true,
+    autoHideMenuBar: true, // 隐藏上方菜单栏
   });
 
   // 优先加载打包后的文件

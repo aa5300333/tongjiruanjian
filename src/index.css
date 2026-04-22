@@ -9,11 +9,8 @@
 
 @layer base {
   html, body {
-    @apply w-screen h-screen;
+    @apply min-h-screen w-full;
     background-color: #E4E3E0;
-    overflow: hidden;
-    margin: 0;
-    padding: 0;
   }
   
   table, .lottery-table {
