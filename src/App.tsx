@@ -88,11 +88,11 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1120;
+    return saved ? parseInt(saved) : 1325;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 865;
+    return saved ? parseInt(saved) : 864;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -1915,14 +1915,14 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => {
-                      setTempAppWidth(1120);
-                      setTempAppHeight(865);
+                      setTempAppWidth(1325);
+                      setTempAppHeight(864);
                     }}
                     className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    一键设置推荐分辨率 (1120 x 865)
+                    一键设置推荐分辨率 (1325 x 864)
                   </button>
-                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
+                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。本软件强制尺寸为 1325x864。</span></p>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">
