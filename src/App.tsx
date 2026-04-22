@@ -88,11 +88,11 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1400;
+    return saved ? parseInt(saved) : 1120;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 1050;
+    return saved ? parseInt(saved) : 865;
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -990,15 +990,9 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-gray-900/5 flex items-center justify-center overflow-auto p-4 md:p-8">
-      <motion.div 
-        initial={false}
-        animate={{ width: appWidth, height: appHeight }}
-        transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="bg-white text-[#141414] font-sans flex overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.1)] border border-gray-200 flex-shrink-0 relative rounded-lg"
-      >
-        {/* Sidebar Navigation */}
-        <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
+    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
+      {/* Sidebar Navigation */}
+      <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
           <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
@@ -1355,8 +1349,8 @@ export default function App() {
                         return (
                           <div 
                             key={item.num} 
-                            className={`py-0 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
-                            style={{ height: '17px' }}
+                            className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
+                            style={{ height: '20px' }}
                           >
                             <div className="flex items-center gap-1 leading-none">
                               <span className={`text-[11pt] font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
@@ -1892,31 +1886,37 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-mono font-bold uppercase tracking-widest block">主窗口初始尺寸 (Geometry)</label>
-                    <span className="text-[10px] font-mono text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded">root.geometry("{tempAppWidth}x{tempAppHeight}")</span>
-                  </div>
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40 font-bold">宽 (W)</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">宽</span>
                       <input 
                         type="number" 
                         value={tempAppWidth}
                         onChange={(e) => setTempAppWidth(parseInt(e.target.value) || 0)}
-                        className="w-full pl-12 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
+                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
                       />
                     </div>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40 font-bold">高 (H)</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">高</span>
                       <input 
                         type="number" 
                         value={tempAppHeight}
                         onChange={(e) => setTempAppHeight(parseInt(e.target.value) || 0)}
-                        className="w-full pl-12 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
+                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
                       />
                     </div>
                   </div>
-                  <p className="text-[9px] font-mono opacity-40">显式设置桌面客户端启动时的窗口尺寸。注意：此参数仅供桌面主程序初始化参考。</p>
+                  <button 
+                    onClick={() => {
+                      setTempAppWidth(1120);
+                      setTempAppHeight(865);
+                    }}
+                    className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
+                  >
+                    一键设置推荐分辨率 (1120 x 865)
+                  </button>
+                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">
@@ -2088,7 +2088,6 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-      </motion.div>
     </div>
   );
 }

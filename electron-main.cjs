@@ -4,9 +4,9 @@ const path = require('path');
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400,
-    height: 1050,
+    height: 1200, // Increased for full screenshots
     minWidth: 1400,
-    minHeight: 1050,
+    minHeight: 1200,
     resizable: false, // Fixed for screenshot consistency
     title: "财务智能统计软件",
     icon: path.join(__dirname, 'dist/favicon.ico'), // 如果有图标的话
