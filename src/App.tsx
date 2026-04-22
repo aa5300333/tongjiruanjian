@@ -990,10 +990,12 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-gray-900/5 flex items-center justify-center overflow-auto p-8">
-      <div 
-        style={{ width: `${appWidth}px`, height: `${appHeight}px` }}
-        className="bg-white text-[#141414] font-sans flex overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.15)] border border-gray-200 flex-shrink-0 relative"
+    <div className="min-h-screen w-full bg-gray-900/5 flex items-center justify-center overflow-auto p-4 md:p-8">
+      <motion.div 
+        initial={false}
+        animate={{ width: appWidth, height: appHeight }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="bg-white text-[#141414] font-sans flex overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.1)] border border-gray-200 flex-shrink-0 relative rounded-lg"
       >
         {/* Sidebar Navigation */}
         <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
@@ -2086,7 +2088,7 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-      </div>
+      </motion.div>
     </div>
   );
 }
