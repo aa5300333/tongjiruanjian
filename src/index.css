@@ -9,11 +9,9 @@
 
 @layer base {
   html, body {
-    @apply w-full h-full;
+    @apply w-screen h-screen;
     background-color: #E4E3E0;
     overflow: hidden;
-    width: 1325px;
-    height: 864px;
     margin: 0;
     padding: 0;
   }

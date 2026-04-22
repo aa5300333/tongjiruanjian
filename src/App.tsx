@@ -88,12 +88,28 @@ export default function App() {
   });
   const [appWidth, setAppWidth] = useState<number>(() => {
     const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1325;
+    return saved ? parseInt(saved) : 1125;
   });
   const [appHeight, setAppHeight] = useState<number>(() => {
     const saved = localStorage.getItem('appHeight');
     return saved ? parseInt(saved) : 864;
   });
+
+  const [windowSize, setWindowSize] = useState({ 
+    width: typeof window !== 'undefined' ? window.innerWidth : 1125, 
+    height: typeof window !== 'undefined' ? window.innerHeight : 864 
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const scaleX = windowSize.width / 1125;
+  const scaleY = windowSize.height / 864;
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
@@ -990,7 +1006,30 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#E4E3E0] text-[#141414] font-sans p-2 md:p-4">
+    <div 
+      style={{ 
+        width: '100vw', 
+        height: '100vh', 
+        overflow: 'hidden', 
+        backgroundColor: '#E4E3E0',
+        position: 'fixed',
+        top: 0,
+        left: 0
+      }}
+    >
+      <div
+        style={{
+          width: '1125px',
+          height: '864px',
+          transform: `scale(${scaleX}, ${scaleY})`,
+          transformOrigin: 'top left',
+          position: 'absolute',
+          top: 0,
+          left: 0
+        }}
+        className="text-[#141414] font-sans selection:bg-blue-100"
+      >
+        <div className="min-h-full p-2 md:p-4 overflow-hidden flex flex-col">
       <div 
         className="mx-auto space-y-4"
         style={{ width: `${appWidth}px`, minWidth: `${appWidth}px` }}
@@ -1915,12 +1954,12 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => {
-                      setTempAppWidth(1325);
+                      setTempAppWidth(1125);
                       setTempAppHeight(864);
                     }}
                     className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    一键设置推荐分辨率 (1325 x 864)
+                    一键设置推荐分辨率 (1125 x 864)
                   </button>
                   <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。本软件强制尺寸为 1325x864。</span></p>
                 </div>
@@ -2094,6 +2133,8 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+        </div>
+      </div>
     </div>
   );
 }

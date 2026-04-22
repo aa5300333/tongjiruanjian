@@ -4,11 +4,7 @@ const path = require('path');
 function createWindow() {
   const win = new BrowserWindow({
     width: 1325,
-    height: 864,
-    minWidth: 1325,
-    minHeight: 864,
-    maxWidth: 1325,
-    maxHeight: 864,
+    height: 964,
     useContentSize: true,
     title: "财务智能统计软件",
     resizable: true,
