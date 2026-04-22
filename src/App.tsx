@@ -86,12 +86,22 @@ export default function App() {
     const saved = localStorage.getItem('rebate');
     return saved ? parseFloat(saved) : 4;
   });
+  const [appWidth, setAppWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('appWidth');
+    return saved ? parseInt(saved) : 1400;
+  });
+  const [appHeight, setAppHeight] = useState<number>(() => {
+    const saved = localStorage.getItem('appHeight');
+    return saved ? parseInt(saved) : 1050;
+  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
   const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
   const [tempRequireUndoConfirm, setTempRequireUndoConfirm] = useState(requireUndoConfirm);
   const [tempRequireUndoPasteConfirm, setTempRequireUndoPasteConfirm] = useState(requireUndoPasteConfirm);
+  const [tempAppWidth, setTempAppWidth] = useState(appWidth);
+  const [tempAppHeight, setTempAppHeight] = useState(appHeight);
 
   // Initialize temp states when settings opens
   useEffect(() => {
@@ -101,8 +111,10 @@ export default function App() {
       setTempEnableSearchUndo(enableSearchUndo);
       setTempRequireUndoConfirm(requireUndoConfirm);
       setTempRequireUndoPasteConfirm(requireUndoPasteConfirm);
+      setTempAppWidth(appWidth);
+      setTempAppHeight(appHeight);
     }
-  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm]);
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm, appWidth, appHeight]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
@@ -1337,8 +1349,8 @@ export default function App() {
                         return (
                           <div 
                             key={item.num} 
-                            className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
-                            style={{ height: '20px' }}
+                            className={`py-0 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
+                            style={{ height: '17px' }}
                           >
                             <div className="flex items-center gap-1 leading-none">
                               <span className={`text-[11pt] font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
@@ -1873,6 +1885,34 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="space-y-4 pt-2 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-mono font-bold uppercase tracking-widest block">主窗口初始尺寸 (Geometry)</label>
+                    <span className="text-[10px] font-mono text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded">root.geometry("{tempAppWidth}x{tempAppHeight}")</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40 font-bold">宽 (W)</span>
+                      <input 
+                        type="number" 
+                        value={tempAppWidth}
+                        onChange={(e) => setTempAppWidth(parseInt(e.target.value) || 0)}
+                        className="w-full pl-12 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
+                      />
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40 font-bold">高 (H)</span>
+                      <input 
+                        type="number" 
+                        value={tempAppHeight}
+                        onChange={(e) => setTempAppHeight(parseInt(e.target.value) || 0)}
+                        className="w-full pl-12 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[9px] font-mono opacity-40">显式设置桌面客户端启动时的窗口尺寸。注意：此参数仅供桌面主程序初始化参考。</p>
+                </div>
+
                 <div className="space-y-2 pt-2 border-t border-gray-100">
                   <label className="text-xs font-mono font-bold uppercase tracking-widest block text-blue-600">高级：多窗口录入助手</label>
                   <a 
@@ -1894,11 +1934,15 @@ export default function App() {
                     setEnableSearchUndo(tempEnableSearchUndo);
                     setRequireUndoConfirm(tempRequireUndoConfirm);
                     setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
+                    setAppWidth(tempAppWidth);
+                    setAppHeight(tempAppHeight);
                     localStorage.setItem('odds', tempOdds.toString());
                     localStorage.setItem('rebate', tempRebate.toString());
                     localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
                     localStorage.setItem('requireUndoConfirm', tempRequireUndoConfirm.toString());
                     localStorage.setItem('requireUndoPasteConfirm', tempRequireUndoPasteConfirm.toString());
+                    localStorage.setItem('appWidth', tempAppWidth.toString());
+                    localStorage.setItem('appHeight', tempAppHeight.toString());
                     setIsSettingsOpen(false);
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"
