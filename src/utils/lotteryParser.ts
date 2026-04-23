@@ -80,7 +80,7 @@ export interface ParseResult {
 export const STRONG_KEYWORDS = [
   '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', 'x', 'X', '￥'
 ];
-export const WEAK_KEYWORDS = [':', '/', '：', '=', '＝', '号', '码'];
+export const WEAK_KEYWORDS = [':', '/', '：', '=', '＝', '号', '码', '号码', '波色', '色', '条'];
 export const ALL_KEYWORDS = [...STRONG_KEYWORDS, ...WEAK_KEYWORDS];
 
 /**
@@ -223,12 +223,17 @@ export function parseInput(input: string): ParseResult[] {
     return ' ';
   });
 
-  // 3. 处理跨行指令，并在特定情况下转换 "-"
-  // 逻辑：如果输入包含 "18-100" 这种格式，且 "-" 后的数字大于 49，则将其转换为 "18各100"
-  let rangeProcessed = cleanedInput.replace(/(\d+)\s*-\s*(\d+)(?![-\d])/g, (match, p1, p2) => {
-    const num = parseInt(p1, 10);
-    const amount = parseInt(p2, 10);
-    if (num <= 49 && amount > 49) {
+  // 2. 处理 "X到Y"
+  const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*到\s*(\d+|[一二三四五六七八九十百]+)/g;
+  let rangeProcessed = cleanedInput.replace(rangeRegex, (match, p1, p2) => {
+    const start = /\d/.test(p1) ? parseInt(p1, 10) : chineseToNumber(p1);
+    const end = /\d/.test(p2) ? parseInt(p2, 10) : chineseToNumber(p2);
+    // 如果是非常明显的下注范围（1到49内），则保留原始格式供后面 parseSegment 解析
+    if (start >= 1 && start <= 49 && end >= 1 && end <= 49) {
+      return match;
+    }
+    // 否则（如 1-100），视为“1到49各100”这种隐含指令的变体
+    if (start <= 49 && end > 49) {
       return `${p1}各${p2}`;
     }
     return match;
@@ -315,18 +320,19 @@ function splitByAnchors(text: string): string[] {
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 
   // 匹配强关键字：后面跟着数字即可
-  const strongRegex = new RegExp(`(${strongPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])`, 'g');
+  // 改进：使用更精准的金额看护，支持中文数字后接阿拉伯数字（如“五十35”识别为“五十”和“35”）
+  const strongRegex = new RegExp(`(${strongPattern})\\s*[,，、\\s。#\\-]*\\s*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\\s*(?:元|米|斤|块|位|个|一个)?`, 'g');
   
   // 匹配弱关键字：
   // 1. 后面跟着币种后缀
   // 2. 后面跟着 > 49 的数字
   // 3. 后面跟着数字，且数字后紧跟记录分隔符（空格、逗号、分号、结句符号或行尾）
-  const weakRegex = new RegExp(`(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+)\\s*(?=[\\s,，、;；。]|$)`, 'g');
+  const weakRegex = new RegExp(`(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\\s*(元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+)\\s*(?=[\\s,，、;；。]|$)`, 'g');
 
   // 匹配隐式金额锚点：数字 > 49 且前面有力分隔符（或处于开头），且后面没有紧接其他数字或明确锚点关键字/目标关键字
   // 这用于识别如 "龙蛇牛猴马100" 这种没有 "各" 的指令
-  // 修正：增加对“尾”、“到”、“拖”、“胆”等关键字的排除，防止“123尾”被切断
-  const implicitRegex = /(?:^|[\s,，、；;。])(\d{2,})(?![.\d各字个每打买下xX￥=＝:：号码尾到拖胆带中碰])/g;
+  // 修正：增加对“头”、“尾”、“到”、“拖”、“胆”等关键字的排除，且支持其前有空格，防止“123 头”被切断
+  const implicitRegex = /(?:^|[\s,，、；;。])(\d{2,})(?!\s*[.\d各字个每打买下xX￥=＝:：号码尾头到拖胆带中碰])/g;
 
   const allMatches: { index: number, length: number, keyword: string }[] = [];
   
@@ -341,14 +347,14 @@ function splitByAnchors(text: string): string[] {
     if (after.includes('到')) continue;
     
     // 如果是纯数字且 <= 49，且没有后缀，则忽略
-    const amountStr = match[2] || match[5] || match[7];
-    const hasSuffix = !!match[3];
+    const amountStr = match[2] || match[3] || match[6] || match[8];
+    const hasSuffix = !!match[4];
     if (!hasSuffix && /^\d+$/.test(amountStr)) {
       const val = parseInt(amountStr, 10);
       if (val <= 49) continue;
     }
     
-    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] || match[4] || match[6] });
+    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] || match[5] || match[7] });
   }
 
   while ((match = implicitRegex.exec(text)) !== null) {
@@ -420,7 +426,8 @@ function splitByAnchors(text: string): string[] {
   }
   
   if (segments.length === 0 && /\d+/.test(text)) {
-    segments.push(text);
+    // 移除 fallback，如果没有任何锚点且不是隐式末尾，则返回空，让上一层 buffer 处理
+    // segments.push(text);
   }
   
   return segments;
@@ -441,14 +448,14 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 规则：强度优先 (Strong > Weak)，位置优先 (Right-most)，长度优先 (Longer wins)
   const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
   const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const anchorRegex = new RegExp(`(${kwPattern})\\s*[,，、\\s。#\\-]*\\s*(\\d+|[一二三四五六七八九十百]+)\\s*(?:元|米|斤|块|位|个|一个)?(?![\\d一二三四五六七八九十百])`, 'g');
+  const anchorRegex = new RegExp(`(${kwPattern})\\s*[,，、\\s。#\\-]*\\s*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\\s*(?:元|米|斤|块|位|个|一个)?`, 'g');
 
   const matches: { keyword: string, amount: string, index: number, length: number, isStrong: boolean }[] = [];
   let m;
   while ((m = anchorRegex.exec(segment)) !== null) {
     matches.push({
       keyword: m[1],
-      amount: m[2],
+      amount: m[2] || m[3],
       index: m.index,
       length: m[0].length,
       isStrong: STRONG_KEYWORDS.includes(m[1])
@@ -478,10 +485,20 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     amountStr = bestMatch.amount;
   } else {
     // 兜底逻辑：找末尾数字 (隐式指令)
-    const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
+    // 限制：如果是纯数字且无后缀，应 > 49，防止误伤 18各50 这种跨行指令的尾部数字
+    const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(元|米|斤|块|位|个|一个)?\D*$/);
     if (tailMatch) {
-      targetsStr = tailMatch[1].trim();
-      amountStr = tailMatch[2].trim();
+      const candidateAmount = tailMatch[2];
+      const hasSuffix = !!tailMatch[3];
+      let isValid = true;
+      if (!hasSuffix && /^\d+$/.test(candidateAmount)) {
+        const val = parseInt(candidateAmount, 10);
+        if (val <= 49) isValid = false;
+      }
+      if (isValid) {
+        targetsStr = tailMatch[1].trim();
+        amountStr = candidateAmount;
+      }
     }
   }
 
@@ -490,12 +507,20 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
     // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
-    // 注意：此处不再包含谐音字，确保识别结果“按标准来”
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽肖红蓝绿大小单双到尾中碰反字数合金木水火土]`, 'g');
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽肖红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色]`, 'g');
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;
-    normalized = normalized.replace(/合数/g, '合'); // 统一将“合数”转换为“合”，如 合数单 -> 合单
+    normalized = normalized.replace(/合数/g, '合'); // 统一将“合数”转换为“合”
+
+    // 1. 规整化：颜色简写 -> 标准波色
+    normalized = normalized.replace(/[兰篮]/g, '蓝');
+    normalized = normalized.replace(/(红|蓝|绿)(?!波|单|双|大|小|合)/g, '$1波');
+    
+    // 2. 规整化：分类词 -> 标准名
+    normalized = normalized.replace(/家禽|家肖|家兽|家/g, '家禽');
+    normalized = normalized.replace(/野肖|野兽|野/g, '野肖');
+
     Object.entries(ZODIAC_HOMOPHONES).forEach(([real, variations]) => {
       variations.forEach(v => {
         if (v !== real) {
@@ -504,27 +529,32 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       });
     });
 
-    // 特殊处理：将 "345尾" 或 "尾345" 转换成 "3尾 4尾 5尾" 这种格式，防止后续数字串被错误拆分
-    normalized = normalized.replace(/(\d+)尾/g, (match, p1) => {
-      return p1.split('').map((c: string) => `${c}尾`).join(' ');
-    });
-    normalized = normalized.replace(/尾(\d+)/g, (match, p1) => {
-      return p1.split('').map((c: string) => `${c}尾`).join(' ');
+    // 特殊处理：将 "0 1 2头", "345尾", "尾345" 等转换成 "0头 1头 2头" 格式显示
+    // 统一处理前后缀形式，并防止二次干扰导致的“00 1头 头”错误
+    const headTailRegex = /((?:\d+[\s.，、]*)+)([头尾])|([头尾])\s*((?:\d+[\s.，、]*)+)/g;
+    normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
+      const p = pSuffix || pPrefix;
+      const suffix = suffixStr || prefixStr;
+      const digits = p.match(/\d/g);
+      if (digits) {
+        return digits.map(d => ` ${d}${suffix} `).join(' ');
+      }
+      return match;
     });
 
     return normalized
       .replace(whitelist, ' ')                    // 不在白名单内的全部替换为空格
       .replace(/([马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, ' $1 ') // 仅针对生肖字前后增加空格，实现生肖间的分离
-      .replace(/(\d+)(?!尾)/g, ' $1 ')             // 确保普通数字前后有空格
-      .replace(/(\d+尾)/g, ' $1 ')                // 确保“X尾”作为一个整体前后有空格
+      .replace(/(\d+)(?![尾头])/g, ' $1 ')         // 确保普通数字前后有空格，排除尾/头
+      .replace(/(\d+[尾头])/g, ' $1 ')             // 确保“X尾/X头”作为一个整体前后有空格
       .replace(/\s+/g, ' ')                       // 合并多个空格
       .trim()
       .split(' ')
       .flatMap(part => {
-        // 如果是 "3尾" 这种格式，直接返回，不补零
-        const tailMatch = part.match(/^(\d+)尾$/);
-        if (tailMatch) {
-          return [tailMatch[1] + '尾'];
+        // 如果是 "3尾" 或 "3头" 这种格式，直接返回，不补零
+        const catMatch = part.match(/^(\d+)[尾头]$/);
+        if (catMatch) {
+          return [part];
         }
 
         if (/^\d+$/.test(part)) {
@@ -638,29 +668,71 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       }
     });
 
-    // 1. 处理 "X尾" 或 "尾X" (支持多位，如 "1478尾", "尾1478")
-    const tailRegex = /(?:(\d+|[零一二三四五六七八九]+)尾|尾(\d+|[零一二三四五六七八九]+))/g;
-    let tailMatch;
-    // 使用 remainingStr 进行正则匹配
-    while ((tailMatch = tailRegex.exec(remainingStr)) !== null) {
-      const tailStr = tailMatch[1] || tailMatch[2];
-      if (/^\d+$/.test(tailStr)) {
-        // 如果是纯数字，拆分每个数字作为尾数
-        for (const char of tailStr) {
-          const tail = parseInt(char, 10);
+    // 1. 处理 "X尾" 或 "尾X" (逻辑优化：使用更贪婪的正则表达式捕获前缀)
+    const tailRegex = /([\d\s.，、零一二三四五六七八九]+)尾/g;
+    const tailPrefixRegex = /尾([\d\s.，、零一二三四五六七八九]+)/g;
+    
+    let tMatch;
+    while ((tMatch = tailRegex.exec(remainingStr)) !== null) {
+      const digits = tMatch[1].match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
           for (let i = 1; i <= 49; i++) {
             if (i % 10 === tail) allNumbers.push(i);
           }
-        }
-      } else {
-        // 处理中文数字
-        const tail = chineseToNumber(tailStr);
-        for (let i = 1; i <= 49; i++) {
-          if (i % 10 === tail) allNumbers.push(i);
-        }
+        });
       }
     }
     remainingStr = remainingStr.replace(tailRegex, ' ');
+    
+    while ((tMatch = tailPrefixRegex.exec(remainingStr)) !== null) {
+      const digits = tMatch[1].match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          for (let i = 1; i <= 49; i++) {
+            if (i % 10 === tail) allNumbers.push(i);
+          }
+        });
+      }
+    }
+    remainingStr = remainingStr.replace(tailPrefixRegex, ' ');
+
+    // 1.1 处理 "X头" 或 "头X"
+    const headRegex = /([\d\s.，、零一二三四五六七八九]+)头/g;
+    const headPrefixRegex = /头([\d\s.，、零一二三四五六七八九]+)/g;
+    
+    let hMatch;
+    while ((hMatch = headRegex.exec(remainingStr)) !== null) {
+      const digits = hMatch[1].match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          if (head >= 0 && head <= 4) {
+            for (let i = 1; i <= 49; i++) {
+              if (Math.floor(i / 10) === head) allNumbers.push(i);
+            }
+          }
+        });
+      }
+    }
+    remainingStr = remainingStr.replace(headRegex, ' ');
+
+    while ((hMatch = headPrefixRegex.exec(remainingStr)) !== null) {
+      const digits = hMatch[1].match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          if (head >= 0 && head <= 4) {
+            for (let i = 1; i <= 49; i++) {
+              if (Math.floor(i / 10) === head) allNumbers.push(i);
+            }
+          }
+        });
+      }
+    }
+    remainingStr = remainingStr.replace(headPrefixRegex, ' ');
 
     // 2. 处理 "X到Y"
     const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*到\s*(\d+|[一二三四五六七八九十百]+)/g;
@@ -704,8 +776,15 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       { key: '小', filter: (n: number) => n <= 24 },
       { key: '单', filter: (n: number) => n % 2 !== 0 },
       { key: '双', filter: (n: number) => n % 2 === 0 },
+      { key: '红波', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) },
+      { key: '蓝波', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '兰波', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '篮波', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '绿波', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
       { key: '红', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) },
       { key: '蓝', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '兰', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '篮', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
       { key: '绿', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
       { key: '金', filter: (n: number) => (ELEMENTS_MAP['金'] as unknown as number[]).includes(n) },
       { key: '木', filter: (n: number) => (ELEMENTS_MAP['木'] as unknown as number[]).includes(n) },

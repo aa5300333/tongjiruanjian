@@ -636,24 +636,55 @@ export default function App() {
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
       // Apply styles and comments
+      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+      // Set header style (Row 0)
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellRef = XLSX.utils.encode_cell({ r: 0, c: C });
+        if (ws[cellRef]) {
+          ws[cellRef].s = {
+            font: { name: "宋体", sz: 11, bold: true },
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+              top: { style: "thin" },
+              bottom: { style: "thin" },
+              left: { style: "thin" },
+              right: { style: "thin" }
+            }
+          };
+        }
+      }
+
       exportData.forEach((d, i) => {
         const row = i + 1; // Header is row 0
+
+        // Set default style for all cells in the row
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellRef = XLSX.utils.encode_cell({ r: row, c: C });
+          if (ws[cellRef]) {
+            ws[cellRef].s = {
+              font: { name: "宋体", sz: 11 },
+              alignment: { vertical: "center" },
+              border: {
+                top: { style: "thin" },
+                bottom: { style: "thin" },
+                left: { style: "thin" },
+                right: { style: "thin" }
+              }
+            };
+          }
+        }
 
         // Column B: Parsed Preview (Red if deduct)
         const cellB = XLSX.utils.encode_cell({ r: row, c: 1 });
         if (ws[cellB] && d.isDeduct) {
-          ws[cellB].s = {
-            font: { color: { rgb: "FF0000" } }
-          };
+          ws[cellB].s.font.color = { rgb: "FF0000" };
         }
 
-        // Column C: Bet Amount (Alignment, Bold, Size 11)
+        // Column C: Bet Amount (Alignment, Bold)
         const cellC = XLSX.utils.encode_cell({ r: row, c: 2 });
         if (ws[cellC]) {
-          ws[cellC].s = {
-            font: { sz: 11, bold: true },
-            alignment: { horizontal: "center", vertical: "center" }
-          };
+          ws[cellC].s.font.bold = true;
+          ws[cellC].s.alignment.horizontal = "center";
           
           // Add comment to C column
           if (d.fullRaw) {
@@ -662,13 +693,18 @@ export default function App() {
           }
         }
         
-        // Column D: Winning Amount (Red, Bold, Center, Size 11)
+        // Column D: Winning Amount (Red, Bold, Center)
         const cellD = XLSX.utils.encode_cell({ r: row, c: 3 });
         if (ws[cellD]) {
-          ws[cellD].s = {
-            font: { sz: 11, bold: true, color: { rgb: "FF0000" } },
-            alignment: { horizontal: "center", vertical: "center" }
-          };
+          ws[cellD].s.font.bold = true;
+          ws[cellD].s.font.color = { rgb: "FF0000" };
+          ws[cellD].s.alignment.horizontal = "center";
+        }
+
+        // Column E: Payout (Center)
+        const cellE = XLSX.utils.encode_cell({ r: row, c: 4 });
+        if (ws[cellE]) {
+          ws[cellE].s.alignment.horizontal = "center";
         }
       });
 
