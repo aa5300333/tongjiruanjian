@@ -496,11 +496,31 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
     // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽肖红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色]`, 'g');
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色]`, 'g');
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;
+    normalized = normalized.replace(/肖/g, ' ');   // 移除单独的“肖”字
     normalized = normalized.replace(/合数/g, '合'); // 统一将“合数”转换为“合”
+
+    // 将中文数字转换为阿拉伯数字进行显示
+    normalized = normalized.replace(/零/g, '0')
+                           .replace(/一/g, '1')
+                           .replace(/二/g, '2')
+                           .replace(/三/g, '3')
+                           .replace(/四/g, '4')
+                           .replace(/五/g, '5')
+                           .replace(/六/g, '6')
+                           .replace(/七/g, '7')
+                           .replace(/八/g, '8')
+                           .replace(/九/g, '9');
+    
+    // 针对“十”，进行智能转换以支持 11-19, 20-99 等
+    normalized = normalized.replace(/([0-9])十([0-9])/g, '$1$2')
+                           .replace(/十([0-9])/g, '1$1')
+                           .replace(/([0-9])十/g, '$10')
+                           .replace(/十/g, '10');
+    normalized = normalized.replace(/百/g, '100');
 
     // 1. 规整化：颜色简写 -> 标准波色
     normalized = normalized.replace(/[兰篮]/g, '蓝');
