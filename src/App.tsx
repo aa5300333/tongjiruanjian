@@ -18,7 +18,9 @@ import {
   Settings,
   Minus,
   Copy,
-  Upload
+  Upload,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import XLSX from 'xlsx-js-style';
@@ -117,6 +119,36 @@ export default function App() {
     return saved ? parseInt(saved) : null;
   });
   const [specialNumberInput, setSpecialNumberInput] = useState(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
+  const [auxSpecialNumber, setAuxSpecialNumber] = useState<number | null>(() => {
+    const saved = localStorage.getItem('auxSpecialNumber');
+    return saved ? parseInt(saved) : null;
+  });
+  const [auxSpecialNumberInput, setAuxSpecialNumberInput] = useState(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
+  const [riskNumbers, setRiskNumbers] = useState<string[]>(() => {
+    const saved = localStorage.getItem('riskNumbers');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.map((v: any) => v === null ? '' : v.toString());
+      } catch (e) {
+        return Array(15).fill('');
+      }
+    }
+    return Array(15).fill('');
+  });
+  const [isRiskModalOpen, setIsRiskModalOpen] = useState(false);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const riskInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Auto-close error alerts after 3 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   // Detect standalone mode AND sync data across windows
   useEffect(() => {
@@ -136,11 +168,13 @@ export default function App() {
       if (e.key === 'financeRecords') setFinanceRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'compoundRecords') setCompoundRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'specialNumber') setSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
+      if (e.key === 'auxSpecialNumber') setAuxSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
       if (e.key === 'odds') setOdds(e.newValue ? parseFloat(e.newValue) : 48.5);
       if (e.key === 'rebate') setRebate(e.newValue ? parseFloat(e.newValue) : 4);
       if (e.key === 'enableSearchUndo') setEnableSearchUndo(e.newValue === 'true');
       if (e.key === 'requireUndoConfirm') setRequireUndoConfirm(e.newValue === 'true');
       if (e.key === 'requireUndoPasteConfirm') setRequireUndoPasteConfirm(e.newValue === 'true');
+      if (e.key === 'riskNumbers') setRiskNumbers(JSON.parse(e.newValue || '[]'));
     };
 
     window.addEventListener('storage', handleStorageSync);
@@ -197,6 +231,79 @@ export default function App() {
   const totalTurnover = useMemo(() => {
     return Object.values(financeBetData).reduce((sum: number, val: number) => sum + val, 0);
   }, [financeBetData]);
+
+  useEffect(() => {
+    localStorage.setItem('riskNumbers', JSON.stringify(riskNumbers));
+  }, [riskNumbers]);
+
+  useEffect(() => {
+    localStorage.setItem('tempSpecialNumber', auxSpecialNumber ? auxSpecialNumber.toString() : '');
+    localStorage.setItem('auxSpecialNumber', auxSpecialNumber ? auxSpecialNumber.toString() : '');
+  }, [auxSpecialNumber]);
+
+  const handleRiskInputChange = (index: number, value: string) => {
+    const newRisk = [...riskNumbers];
+    const cleanValue = value.replace(/[^\d]/g, '').slice(-2);
+    
+    // Validate number 0-49 if not empty
+    if (cleanValue === '') {
+      newRisk[index] = '';
+      setRiskNumbers(newRisk);
+      return;
+    }
+
+    const num = parseInt(cleanValue);
+    if (!isNaN(num) && num >= 0 && num <= 49) {
+      newRisk[index] = cleanValue;
+      setRiskNumbers(newRisk);
+      
+      // Auto focus next box if we have 2 digits (e.g. "05", "12")
+      if (cleanValue.length >= 2 && index < 14) {
+        riskInputRefs.current[index + 1]?.focus();
+      }
+    }
+  };
+
+  const handleRiskKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && riskNumbers[index] === '' && index > 0) {
+      riskInputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleRiskPaste = (index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text');
+    // Extract all numbers between 1 and 49
+    const numbers = (text.match(/\d+/g) || [])
+      .map(n => parseInt(n))
+      .filter(n => n >= 1 && n <= 49)
+      .map(n => n.toString().padStart(2, '0'));
+    
+    if (numbers.length === 0) return;
+
+    const newRisk = [...riskNumbers];
+    let currentIdx = index;
+    for (const num of numbers) {
+      if (currentIdx < 15) {
+        newRisk[currentIdx] = num;
+        currentIdx++;
+      }
+    }
+    setRiskNumbers(newRisk);
+    
+    // Auto focus the last filled box if not beyond range
+    const lastFocusIdx = Math.min(index + numbers.length - 1, 14);
+    riskInputRefs.current[lastFocusIdx]?.focus();
+  };
+
+  const getRiskMatchCount = (numbers: number[]) => {
+    const riskSet = new Set(
+      riskNumbers
+        .map(s => parseInt(s))
+        .filter(n => !isNaN(n) && n >= 1 && n <= 49)
+    );
+    return numbers.filter(n => riskSet.has(n)).length;
+  };
 
   const handleUndo = (recordId: string) => {
     // Try finding in financeRecords first
@@ -354,6 +461,7 @@ export default function App() {
           res.numbers.forEach(num => {
             newBetData[num] = Number((newBetData[num] + grossAmount).toFixed(2));
           });
+          const matchCount = getRiskMatchCount(res.numbers);
           items.push({
             targets: res.numbers,
             amount: grossAmount,
@@ -512,6 +620,10 @@ export default function App() {
       setFinanceBetData(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])));
       setFinanceRecords([]);
       setSpecialNumber(null);
+      setAuxSpecialNumber(null);
+      setAuxSpecialNumberInput('');
+      // 同时清空风险号码
+      setRiskNumbers(Array(15).fill(''));
     } else {
       setCompoundRecords([]);
       setDrawNumbers(Array(7).fill(null));
@@ -643,13 +755,7 @@ export default function App() {
         if (ws[cellRef]) {
           ws[cellRef].s = {
             font: { name: "宋体", sz: 11, bold: true },
-            alignment: { horizontal: "center", vertical: "center" },
-            border: {
-              top: { style: "thin" },
-              bottom: { style: "thin" },
-              left: { style: "thin" },
-              right: { style: "thin" }
-            }
+            alignment: { horizontal: "center", vertical: "center" }
           };
         }
       }
@@ -663,13 +769,7 @@ export default function App() {
           if (ws[cellRef]) {
             ws[cellRef].s = {
               font: { name: "宋体", sz: 11 },
-              alignment: { vertical: "center" },
-              border: {
-                top: { style: "thin" },
-                bottom: { style: "thin" },
-                left: { style: "thin" },
-                right: { style: "thin" }
-              }
+              alignment: { vertical: "center" }
             };
           }
         }
@@ -836,13 +936,19 @@ export default function App() {
                 }
               });
 
-              if (segmentCount > 0) {
-                const subTotal = segmentCount * amountPerGroup;
-                totalBet += subTotal;
-                const lineText = `${type}: ${segmentNumbers.join(' | ')} 各${amountPerGroup}（合计：${subTotal}）`;
-                rawPreview += lineText + '\n';
-                previewLines.push(<div key={idx}>{lineText}</div>);
-              }
+                if (segmentCount > 0) {
+                  const subTotal = segmentCount * amountPerGroup;
+                  totalBet += subTotal;
+                  const lineText = `${type}: ${segmentNumbers.join(' | ')} 各${amountPerGroup}（合计：${subTotal}）`;
+                  rawPreview += lineText + '\n';
+                  // Check risk for compound segments (flattened numbers across all lines in segment)
+                  const allNumbersInSegment = contentToProcess.split(/\n/).flatMap(line => 
+                    (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
+                  );
+                  const matchCount = getRiskMatchCount(allNumbersInSegment);
+                  const isHighRisk = matchCount >= 8;
+                  previewLines.push(<div key={idx} className={isHighRisk ? "text-red-600 font-bold" : ""}>{lineText}</div>);
+                }
             }
           });
 
@@ -867,11 +973,14 @@ export default function App() {
         const lineText = `${res.raw} 各${res.amount}（合计：${total}）`;
         rawLines.push(lineText);
 
+        const matchCount = getRiskMatchCount(res.numbers);
+        const isRiskHigh = matchCount >= 8;
+
         // 检测是否有大于 49 的数字
         const hasInvalid = /\d+/.test(res.raw) && (res.raw.match(/\d+/g) || []).some(n => parseInt(n) > 49);
 
         previewLines.push(
-          <div key={idx} className={hasInvalid ? "bg-red-50" : ""}>
+          <div key={idx} className={`${hasInvalid ? "bg-red-50" : ""} ${isRiskHigh ? "text-red-600 font-bold" : ""}`}>
             {renderHighlightedText(res.raw)}
             <span className="opacity-70"> 各{res.amount}（合计：{total}）</span>
           </div>
@@ -1016,67 +1125,81 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
+    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden relative">
+      {/* Sidebar Toggle Button (Moved to Top-Left) */}
+      <button 
+        onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+        className="fixed left-2 top-2 z-[60] bg-gray-100 text-gray-500 p-1.5 hover:bg-gray-200 transition-all rounded shadow-sm flex items-center justify-center border border-gray-300"
+        title={isSidebarVisible ? "隐藏侧边栏" : "显示侧边栏"}
+      >
+        {isSidebarVisible ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+      </button>
+
       {/* Sidebar Navigation */}
-      <aside className="w-[200px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
-        <div className="p-6 border-b border-gray-200">
-          <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
-          <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
-        </div>
-        
-        <nav className="flex-1 p-3 space-y-2">
-          <div className="space-y-1">
-            <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">主要功能</label>
-            <button 
-              onClick={() => setActiveView('stats')}
-              className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
-            >
-              <Calculator size={18} />
-              <span className="text-sm font-bold">财务统计</span>
-            </button>
-            <button 
-              onClick={() => setActiveView('compound')}
-              className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
-            >
-              <TrendingUp size={18} />
-              <span className="text-sm font-bold">复式管理</span>
-            </button>
+      <aside 
+        className="flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20 overflow-hidden"
+        style={{ width: isSidebarVisible ? '200px' : '0px', transition: 'width 0.3s ease-in-out' }}
+      >
+        <div className="w-[200px] flex flex-col h-full">
+          <div className="p-6 border-b border-gray-200">
+            <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
+            <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
           </div>
+          
+          <nav className="flex-1 p-3 space-y-2">
+            <div className="space-y-1">
+              <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">主要功能</label>
+              <button 
+                onClick={() => setActiveView('stats')}
+                className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+              >
+                <Calculator size={18} />
+                <span className="text-sm font-bold">财务统计</span>
+              </button>
+              <button 
+                onClick={() => setActiveView('compound')}
+                className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+              >
+                <TrendingUp size={18} />
+                <span className="text-sm font-bold">复式管理</span>
+              </button>
+            </div>
 
-          <div className="pt-4 space-y-1">
-            <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">数据操作</label>
-            <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-black/5 transition-all"
-            >
-              <Settings size={18} />
-              <span className="text-sm font-bold">系统设置</span>
-            </button>
-            <button 
-              onClick={handleExport}
-              className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 transition-all"
-            >
-              <Download size={18} />
-              <span className="text-sm font-bold">导出报表</span>
-            </button>
-            <button 
-              onClick={() => setShowResetConfirm(true)}
-              className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-red-50 text-red-700 hover:text-red-800 transition-all"
-            >
-              <RotateCcw size={18} />
-              <span className="text-sm font-bold">一键清零</span>
-            </button>
+            <div className="pt-4 space-y-1">
+              <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">数据操作</label>
+              <button 
+                onClick={() => setIsSettingsOpen(true)}
+                className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-black/5 transition-all"
+              >
+                <Settings size={18} />
+                <span className="text-sm font-bold">系统设置</span>
+              </button>
+              <button 
+                onClick={handleExport}
+                className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 transition-all"
+              >
+                <Download size={18} />
+                <span className="text-sm font-bold">导出报表</span>
+              </button>
+              <button 
+                onClick={() => setShowResetConfirm(true)}
+                className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-red-50 text-red-700 hover:text-red-800 transition-all"
+              >
+                <RotateCcw size={18} />
+                <span className="text-sm font-bold">一键清零</span>
+              </button>
+            </div>
+          </nav>
+
+          <div className="p-4 border-t border-gray-200">
+             <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-mono font-bold opacity-70">系统在线</span>
+             </div>
+             <div className="text-[10px] font-mono opacity-30">
+                © 2026 LOTTERY SYSTEM
+             </div>
           </div>
-        </nav>
-
-        <div className="p-4 border-t border-gray-200">
-           <div className="flex items-center gap-2 mb-3">
-              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-              <span className="text-[10px] font-mono font-bold opacity-70">系统在线</span>
-           </div>
-           <div className="text-[10px] font-mono opacity-30">
-              © 2026 LOTTERY SYSTEM
-           </div>
         </div>
       </aside>
 
@@ -1131,6 +1254,39 @@ export default function App() {
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-2">
+                      <span className="text-[10px] font-mono opacity-50 uppercase">辅助特码</span>
+                      <input 
+                        type="text" 
+                        placeholder="01-49"
+                        value={auxSpecialNumberInput}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                          setAuxSpecialNumberInput(val);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = parseInt(auxSpecialNumberInput);
+                            if (!isNaN(val) && val >= 1 && val <= 49) {
+                              setAuxSpecialNumber(val);
+                              (e.target as HTMLInputElement).blur();
+                            } else if (auxSpecialNumberInput === '') {
+                              setAuxSpecialNumber(null);
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          const val = parseInt(auxSpecialNumberInput);
+                          if (!isNaN(val) && val >= 1 && val <= 49) {
+                            setAuxSpecialNumber(val);
+                          } else if (auxSpecialNumberInput === '') {
+                            setAuxSpecialNumber(null);
+                          } else {
+                            setAuxSpecialNumberInput(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
+                          }
+                        }}
+                        className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-yellow-50' : ''}`}
+                      />
                       <span className="text-[10px] font-mono opacity-50 uppercase">本期特码</span>
                       <input 
                         type="text" 
@@ -1156,12 +1312,13 @@ export default function App() {
                           const val = parseInt(specialNumberInput);
                           if (!isNaN(val) && val >= 1 && val <= 49) {
                             setSpecialNumber(val);
-                          } else {
+                          } else if (specialNumberInput === '') {
                             setSpecialNumber(null);
-                            setSpecialNumberInput('');
+                          } else {
+                            setSpecialNumberInput(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
                           }
                         }}
-                        className={`w-12 p-1 font-mono text-xs border border-[#141414] text-center focus:outline-none focus:ring-1 focus:ring-[#141414] ${specialNumber && specialNumber > 0 ? 'bg-yellow-50 border-yellow-600' : ''}`}
+                        className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-gray-100' : ''}`}
                       />
                     </div>
                   </div>
@@ -1188,14 +1345,16 @@ export default function App() {
                       return indices.map((num, idx) => {
                         if (num === null) return <div key={`empty-${idx}`} />;
                         
+                        const areaAmount = Object.values(financeBetData).reduce((sum: number, val: number) => sum + val, 0);
                         const amount = financeBetData[num];
                         const textColor = getBallTextColor(num);
                         const isSpecial = specialNumber === num;
+                        const isAux = auxSpecialNumber === num;
                         
                         return (
                           <div 
                             key={num}
-                            className={`flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded lottery-table ${isSpecial ? 'bg-yellow-50 ring-1 ring-yellow-100' : ''}`}
+                            className={`flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded lottery-table ${isSpecial ? 'bg-gray-300 ring-2 ring-gray-400 font-bold' : ''} ${isAux ? 'bg-yellow-300 ring-2 ring-yellow-400 font-bold' : ''}`}
                           >
                             <div className="flex items-center gap-1 min-w-[42px]">
                               <span className={`text-base font-serif font-bold ${textColor}`}>
@@ -1261,7 +1420,15 @@ export default function App() {
                                   </button>
                                 </div>
                               </div>
-                              <p className="text-[11px] font-mono break-words mt-0.5 pr-8 leading-tight opacity-90">{record.raw}</p>
+                              {(() => {
+                                // Check if any item in this record has >=8 matches with risk numbers
+                                const isHighRisk = record.items.some(item => getRiskMatchCount(item.targets) >= 8);
+                                return (
+                                  <p className={`text-[11px] font-mono break-words mt-0.5 pr-8 leading-tight ${isHighRisk ? 'text-red-600 font-bold' : 'opacity-90'}`}>
+                                    {record.raw}
+                                  </p>
+                                );
+                              })()}
 
                               <AnimatePresence>
                                 {confirmingUndoId === record.id && (
@@ -1309,6 +1476,15 @@ export default function App() {
                       <Plus size={16} />
                       <h2 className="text-xs font-mono font-bold uppercase tracking-widest">智能录入系统</h2>
                     </div>
+                    <a 
+                      href={window.location.origin + window.location.pathname + '?mode=entry'} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[10px] font-bold hover:bg-blue-100 transition-colors"
+                      title="打开悬浮录入助手"
+                    >
+                      🚀 录入助手
+                    </a>
                   </div>
                   
                   <div className="flex flex-col gap-2">
@@ -1341,6 +1517,26 @@ export default function App() {
                     >
                       <Upload size={20} />
                       吃码上报
+                    </button>
+                  </div>
+                </section>
+
+                {/* Risk Number Settings Section */}
+                <section className="bg-white border border-[#141414] p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle size={16} className="text-red-600" />
+                      <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-red-600">风险拦截系统</h2>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => setIsRiskModalOpen(true)}
+                      className="w-full text-[#141414] py-4 font-mono text-base font-bold hover:bg-gray-100 transition-all active:translate-y-1 flex items-center justify-center gap-2 border-2 border-[#141414] border-dashed"
+                    >
+                      <AlertCircle size={20} />
+                      今日特别注意号码 (RISK)
                     </button>
                   </div>
                 </section>
@@ -1916,19 +2112,6 @@ export default function App() {
                   <p className="text-[10px] font-mono opacity-60">当前分辨率已锁定为 <span className="font-bold text-[#141414]">1620 x 930</span>，不支持手动修改。</p>
                 </div>
 
-                <div className="space-y-2 pt-2 border-t border-gray-100">
-                  <label className="text-xs font-mono font-bold uppercase tracking-widest block text-blue-600">高级：多窗口录入助手</label>
-                  <a 
-                    href={window.location.origin + window.location.pathname + '?mode=entry'} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="block w-full p-3 font-mono text-center text-[11px] border-2 border-dashed border-blue-200 hover:border-blue-500 hover:text-blue-600 transition-colors bg-blue-50/30"
-                  >
-                    🚀 点击在新网页中打开录入工具
-                  </a>
-                  <p className="text-[9px] font-mono opacity-50">打开后，您可以将新页面缩小并移到桌面任意位置。在此助手录入的数据会自动同步回此大窗口。</p>
-                </div>
-
                 <button 
                   onClick={() => {
                     // Only apply changes on Save
@@ -1985,6 +2168,68 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Risk Modal */}
+      <AnimatePresence>
+        {isRiskModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsRiskModalOpen(false)}
+              className="absolute inset-0 bg-[#141414]/90 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-md bg-[#F2F1ED] border-4 border-[#141414] p-6 shadow-[8px_8px_0_0_#141414]"
+            >
+              <div className="flex justify-between items-center mb-6 border-b-2 border-[#141414] pb-2">
+                <h3 className="text-xl font-serif italic font-bold">今日风险号码设定</h3>
+                <button onClick={() => setIsRiskModalOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-5 gap-3">
+                {riskNumbers.map((val, i) => (
+                  <input
+                    key={i}
+                    ref={el => riskInputRefs.current[i] = el}
+                    type="text"
+                    inputMode="numeric"
+                    value={val}
+                    onChange={(e) => {
+                      handleRiskInputChange(i, e.target.value);
+                    }}
+                    onKeyDown={(e) => handleRiskKeyDown(i, e)}
+                    onPaste={(e) => handleRiskPaste(i, e)}
+                    placeholder="--"
+                    className="w-full h-12 border-2 border-[#141414] bg-white text-center text-xl font-mono font-bold focus:bg-yellow-100 transition-colors"
+                  />
+                ))}
+              </div>
+
+              <div className="mt-6 flex flex-col gap-2">
+                <button 
+                  onClick={() => setIsRiskModalOpen(false)}
+                  className="w-full bg-[#141414] text-white py-3 font-mono font-bold hover:bg-opacity-90 active:translate-y-1"
+                >
+                  确认保存 (CONFIRM)
+                </button>
+                <button 
+                  onClick={() => setRiskNumbers(Array(15).fill(''))}
+                  className="w-full border-2 border-[#141414] py-2 font-mono font-bold hover:bg-gray-100 transition-all text-[#141414]"
+                >
+                  重置清空 (CLEAR)
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* All History Modal */}
       <AnimatePresence>
         {isHistoryModalOpen && (
@@ -2019,8 +2264,10 @@ export default function App() {
                         }, 0)
                       : 0;
 
+                    const isHighRisk = record.items.some(item => getRiskMatchCount(item.targets) >= 8);
+
                     return (
-                      <div key={record.id} className="group border-b border-dashed border-[#141414] border-opacity-20 pb-2 relative overflow-hidden bg-white/50 p-2 rounded lottery-table">
+                      <div key={record.id} className={`group border-b border-dashed border-[#141414] border-opacity-20 pb-2 relative overflow-hidden bg-white/50 p-2 rounded lottery-table ${isHighRisk ? 'ring-2 ring-red-500 ring-inset' : ''}`}>
                         <div className="flex justify-between items-start">
                           <span className="text-[11pt] opacity-60">{record.time}</span>
                           <div className="flex items-center gap-2">
@@ -2039,9 +2286,9 @@ export default function App() {
                             </button>
                           </div>
                         </div>
-                        <p className="text-[11pt] font-serif font-bold mt-1 uppercase">{record.fullRaw || record.raw}</p>
+                        <p className={`text-[11pt] font-serif font-bold mt-1 uppercase ${isHighRisk ? 'text-red-600' : ''}`}>{record.fullRaw || record.raw}</p>
                         {record.parsedPreview && (
-                          <div className="mt-1 p-1 bg-gray-50 text-[11pt] font-serif font-bold opacity-60 whitespace-pre-wrap border-l-2 border-gray-200 uppercase">
+                          <div className={`mt-1 p-1 bg-gray-50 text-[11pt] font-serif font-bold whitespace-pre-wrap border-l-2 border-gray-200 uppercase ${isHighRisk ? 'text-red-600 border-red-500' : 'opacity-60'}`}>
                             {record.parsedPreview}
                           </div>
                         )}
