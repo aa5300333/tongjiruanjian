@@ -583,14 +583,14 @@ export default function App() {
     if (requireUndoPasteConfirm) {
       setUndoCallback({ 
         fn: async () => {
-          handleReset();
+          handleReset(true);
           await handlePasteAndRecognize();
         }, 
         label: "确定清空所有数据并粘贴新内容？" 
       });
       setShowLastUndoConfirm(true);
     } else {
-      handleReset();
+      handleReset(true);
       handlePasteAndRecognize();
     }
   };
@@ -615,15 +615,17 @@ export default function App() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = (keepRiskNumbers: boolean = false) => {
     if (activeView === 'stats') {
       setFinanceBetData(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])));
       setFinanceRecords([]);
       setSpecialNumber(null);
       setAuxSpecialNumber(null);
       setAuxSpecialNumberInput('');
-      // 同时清空风险号码
-      setRiskNumbers(Array(15).fill(''));
+      // 同时清空风险号码，除非明确要求保留
+      if (!keepRiskNumbers) {
+        setRiskNumbers(Array(15).fill(''));
+      }
     } else {
       setCompoundRecords([]);
       setDrawNumbers(Array(7).fill(null));
@@ -837,12 +839,25 @@ export default function App() {
 
   const renderHighlightedText = (text: string) => {
     const tokens = text.split(/(\d+)/);
+    const riskSet = new Set(
+      riskNumbers
+        .map(s => parseInt(s))
+        .filter(n => !isNaN(n) && n >= 1 && n <= 49)
+    );
+
     return tokens.map((token, i) => {
       if (/^\d+$/.test(token)) {
         const n = parseInt(token, 10);
         if (n > 49) {
           return (
             <span key={i} className="text-red-700 font-bold bg-red-100 px-0.5 rounded border border-red-300 mx-0.5" title="超出范围 (码数只能 01-49)">
+              {token}
+            </span>
+          );
+        }
+        if (riskSet.has(n)) {
+          return (
+            <span key={i} className="text-red-600 font-bold underline" title="此号码在今日录入助手风险名单中">
               {token}
             </span>
           );
@@ -947,7 +962,7 @@ export default function App() {
                   );
                   const matchCount = getRiskMatchCount(allNumbersInSegment);
                   const isHighRisk = matchCount >= 8;
-                  previewLines.push(<div key={idx} className={isHighRisk ? "text-red-600 font-bold" : ""}>{lineText}</div>);
+                  previewLines.push(<div key={idx} className={isHighRisk ? "text-red-600 font-bold" : ""}>{renderHighlightedText(lineText)}</div>);
                 }
             }
           });
@@ -1425,7 +1440,7 @@ export default function App() {
                                 const isHighRisk = record.items.some(item => getRiskMatchCount(item.targets) >= 8);
                                 return (
                                   <p className={`text-[11px] font-mono break-words mt-0.5 pr-8 leading-tight ${isHighRisk ? 'text-red-600 font-bold' : 'opacity-90'}`}>
-                                    {record.raw}
+                                    {renderHighlightedText(record.raw)}
                                   </p>
                                 );
                               })()}
@@ -2151,7 +2166,7 @@ export default function App() {
               <p className="text-sm font-mono opacity-70 mb-6">此操作将永久删除当前所有统计数据和流水记录，无法恢复。</p>
               <div className="flex gap-3">
                 <button 
-                  onClick={handleReset}
+                  onClick={() => handleReset(false)}
                   className="flex-1 bg-red-600 text-white py-2 font-mono text-sm font-bold hover:bg-red-700 transition-colors"
                 >
                   确认清零
@@ -2286,10 +2301,10 @@ export default function App() {
                             </button>
                           </div>
                         </div>
-                        <p className={`text-[11pt] font-serif font-bold mt-1 uppercase ${isHighRisk ? 'text-red-600' : ''}`}>{record.fullRaw || record.raw}</p>
+                        <p className={`text-[11pt] font-serif font-bold mt-1 uppercase ${isHighRisk ? 'text-red-600' : ''}`}>{renderHighlightedText(record.fullRaw || record.raw)}</p>
                         {record.parsedPreview && (
                           <div className={`mt-1 p-1 bg-gray-50 text-[11pt] font-serif font-bold whitespace-pre-wrap border-l-2 border-gray-200 uppercase ${isHighRisk ? 'text-red-600 border-red-500' : 'opacity-60'}`}>
-                            {record.parsedPreview}
+                            {renderHighlightedText(record.parsedPreview)}
                           </div>
                         )}
                         
