@@ -992,7 +992,7 @@ export default function App() {
   return (
     <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden">
       {/* Sidebar Navigation */}
-      <aside className="w-[220px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
+      <aside className="w-[200px] flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20">
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
           <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
@@ -1349,8 +1349,8 @@ export default function App() {
                         return (
                           <div 
                             key={item.num} 
-                            className={`py-0.5 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
-                            style={{ height: '20px' }}
+                            className={`py-0 px-1 ${index === 48 ? '' : 'border-b border-gray-100'} flex items-center justify-between transition-colors lottery-table ${item.risk < 0 ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}
+                            style={{ height: '17px' }}
                           >
                             <div className="flex items-center gap-1 leading-none">
                               <span className={`text-[11pt] font-mono font-bold w-5 ${textColor}`}>{index + 1}</span>
@@ -1909,12 +1909,18 @@ export default function App() {
                   </div>
                   <button 
                     onClick={() => {
-                      setTempAppWidth(1120);
+                      setTempAppWidth(1320);
                       setTempAppHeight(865);
+                      // Force immediate resize if possible (for electron-like environments)
+                      try {
+                        window.resizeTo(1320, 865);
+                      } catch (e) {
+                        console.log('Resize failed', e);
+                      }
                     }}
                     className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
                   >
-                    一键设置推荐分辨率 (1120 x 865)
+                    一键设置推荐分辨率 (1320 x 865)
                   </button>
                   <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
                 </div>
@@ -1942,6 +1948,12 @@ export default function App() {
                     setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
                     setAppWidth(tempAppWidth);
                     setAppHeight(tempAppHeight);
+                    // Force window resize
+                    try {
+                      window.resizeTo(tempAppWidth, tempAppHeight);
+                    } catch (e) {
+                      console.log('Resize failed', e);
+                    }
                     localStorage.setItem('odds', tempOdds.toString());
                     localStorage.setItem('rebate', tempRebate.toString());
                     localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
