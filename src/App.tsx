@@ -86,22 +86,14 @@ export default function App() {
     const saved = localStorage.getItem('rebate');
     return saved ? parseFloat(saved) : 4;
   });
-  const [appWidth, setAppWidth] = useState<number>(() => {
-    const saved = localStorage.getItem('appWidth');
-    return saved ? parseInt(saved) : 1120;
-  });
-  const [appHeight, setAppHeight] = useState<number>(() => {
-    const saved = localStorage.getItem('appHeight');
-    return saved ? parseInt(saved) : 865;
-  });
+  const appWidth = 1620;
+  const appHeight = 930;
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
   const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
   const [tempRequireUndoConfirm, setTempRequireUndoConfirm] = useState(requireUndoConfirm);
   const [tempRequireUndoPasteConfirm, setTempRequireUndoPasteConfirm] = useState(requireUndoPasteConfirm);
-  const [tempAppWidth, setTempAppWidth] = useState(appWidth);
-  const [tempAppHeight, setTempAppHeight] = useState(appHeight);
 
   // Initialize temp states when settings opens
   useEffect(() => {
@@ -111,10 +103,8 @@ export default function App() {
       setTempEnableSearchUndo(enableSearchUndo);
       setTempRequireUndoConfirm(requireUndoConfirm);
       setTempRequireUndoPasteConfirm(requireUndoPasteConfirm);
-      setTempAppWidth(appWidth);
-      setTempAppHeight(appHeight);
     }
-  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm, appWidth, appHeight]);
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
@@ -1887,42 +1877,7 @@ export default function App() {
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
                   <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">宽</span>
-                      <input 
-                        type="number" 
-                        value={tempAppWidth}
-                        onChange={(e) => setTempAppWidth(parseInt(e.target.value) || 0)}
-                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
-                      />
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono opacity-40">高</span>
-                      <input 
-                        type="number" 
-                        value={tempAppHeight}
-                        onChange={(e) => setTempAppHeight(parseInt(e.target.value) || 0)}
-                        className="w-full pl-8 p-2 font-mono text-xs border-2 border-[#141414] focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setTempAppWidth(1320);
-                      setTempAppHeight(865);
-                      // Force immediate resize if possible (for electron-like environments)
-                      try {
-                        window.resizeTo(1320, 865);
-                      } catch (e) {
-                        console.log('Resize failed', e);
-                      }
-                    }}
-                    className="w-full py-1 text-[10px] font-mono border border-blue-500 text-blue-600 hover:bg-blue-50 transition-colors"
-                  >
-                    一键设置推荐分辨率 (1320 x 865)
-                  </button>
-                  <p className="text-[10px] font-mono opacity-40">手动调整软件界面的宽度与主体内容高度（单位：像素）。<br/><span className="text-blue-600 font-bold">提示：如果您觉得风险值显示不全，请调整高度或点击上方一键设置。</span></p>
+                  <p className="text-[10px] font-mono opacity-60">当前分辨率已锁定为 <span className="font-bold text-[#141414]">1620 x 930</span>，不支持手动修改。</p>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-gray-100">
@@ -1946,21 +1901,11 @@ export default function App() {
                     setEnableSearchUndo(tempEnableSearchUndo);
                     setRequireUndoConfirm(tempRequireUndoConfirm);
                     setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
-                    setAppWidth(tempAppWidth);
-                    setAppHeight(tempAppHeight);
-                    // Force window resize
-                    try {
-                      window.resizeTo(tempAppWidth, tempAppHeight);
-                    } catch (e) {
-                      console.log('Resize failed', e);
-                    }
                     localStorage.setItem('odds', tempOdds.toString());
                     localStorage.setItem('rebate', tempRebate.toString());
                     localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
                     localStorage.setItem('requireUndoConfirm', tempRequireUndoConfirm.toString());
                     localStorage.setItem('requireUndoPasteConfirm', tempRequireUndoPasteConfirm.toString());
-                    localStorage.setItem('appWidth', tempAppWidth.toString());
-                    localStorage.setItem('appHeight', tempAppHeight.toString());
                     setIsSettingsOpen(false);
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"
