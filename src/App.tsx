@@ -666,6 +666,7 @@ export default function App() {
 
   const handleClearBoard = () => {
     setFinanceBetData(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])));
+    setFinanceRecords([]);
   };
 
   const handleExport = () => {

@@ -253,40 +253,30 @@ export function parseInput(input: string): ParseResult[] {
   
   let buffer = '';
   for (const chunk of rawChunks) {
-    // 预检：如果 chunk 结尾是数字且 > 49，通常它本身就是一个完整的隐式下注块
-    // 这种块不应该被 buffer 逻辑误合并到下一段
-    const endsWithAmount = (str: string) => {
-      const m = str.match(/(\d+|[一二三四五六七八九十百]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
-      if (!m) return false;
-      const val = chineseToNumber(m[1]);
-      return val >= 50;
-    };
-
-    const anchors = splitByAnchors(chunk);
-    const isImplicitComplete = endsWithAmount(chunk);
+    const segments = splitByAnchors(chunk);
     
-    if (anchors.length > 0) {
-      // 处理逻辑：如果有显式锚点（如“各”），则可以将 buffer 视为它的前缀
-      // 但如果 buffer 已经包含了一个隐式金额，说明 buffer 应该独立处理
-      if (buffer && endsWithAmount(buffer)) {
-        const res = parseSegment(buffer, KEYWORDS, COMBO_KEYWORDS);
-        if (res) allResults.push(...res);
-        buffer = '';
+    if (segments.length > 0) {
+      for (const seg of segments) {
+        // 如果 segment 自身包含锚点，说明它一定能终结之前的目标列表
+        const hasAnchor = checkHasAnchor(seg);
+        
+        if (hasAnchor) {
+          const combined = buffer ? `${buffer} ${seg}` : seg;
+          const results = parseSegment(combined, KEYWORDS, COMBO_KEYWORDS);
+          if (results && results.length > 0) {
+            allResults.push(...results);
+            buffer = '';
+          } else {
+            // 如果带锚点解析仍失败（可能数据还没全），则继续 buffer
+            buffer = combined;
+          }
+        } else {
+          // 不含锚点，说明是目标列表的一部分，继续累积
+          buffer = buffer ? `${buffer} ${seg}` : seg;
+        }
       }
-
-      const firstSegment = buffer ? `${buffer} ${anchors[0]}` : anchors[0];
-      const results = parseSegment(firstSegment, KEYWORDS, COMBO_KEYWORDS);
-      if (results && results.length > 0) {
-        allResults.push(...results);
-      }
-      
-      for (let i = 1; i < anchors.length; i++) {
-        const res = parseSegment(anchors[i], KEYWORDS, COMBO_KEYWORDS);
-        if (res) allResults.push(...res);
-      }
-      buffer = '';
     } else {
-      // 既无锚点，也无末尾金额，视为前缀，继续 buffer
+      // 既无锚点，也无特殊格式，视为前缀，继续 buffer
       buffer = buffer ? `${buffer} ${chunk}` : chunk;
     }
   }
@@ -298,6 +288,38 @@ export function parseInput(input: string): ParseResult[] {
   }
   
   return allResults;
+}
+
+/**
+ * 辅助：检查字符串中是否包含任何金额锚点
+ */
+function checkHasAnchor(text: string): boolean {
+  const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
+  const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))`, 'g');
+  if (strongRegex.test(text)) return true;
+
+  const weakPattern = WEAK_KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))`, 'g');
+  if (weakRegex.test(text) && (/\d+/.test(text) && parseInt(text.match(/\d+/)?.[0] || '0', 10) >= 50 || /[元米斤块位个一个]/.test(text))) return true;
+
+  // 隐式金额点
+  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})(?!\s*[.\d各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰])/g;
+  let m;
+  while ((m = implicitRegex.exec(text)) !== null) {
+    const val = parseInt(m[1], 10);
+    if (val >= 50) return true;
+    
+    // 如果数字位于文本末尾，且前面有实质性内容（非空），则视为可能是一个完整的隐式指令
+    const isAtEnd = (m.index + m[0].length >= text.length - 1);
+    const hasTargetContent = /[^\d\s,各，、；;。/*\-@.]/.test(text.substring(0, m.index));
+    // 即使全数字，如果数字数量 >= 2，最后一个也可能是金额
+    const allDigits = text.match(/\d+/g) || [];
+    
+    if (isAtEnd && (hasTargetContent || allDigits.length >= 2)) return true;
+  }
+  
+  return false;
 }
 
 /**
@@ -348,7 +370,11 @@ function splitByAnchors(text: string): string[] {
 
   while ((match = implicitRegex.exec(text)) !== null) {
     const val = parseInt(match[1], 10);
-    if (val >= 50) {
+    // 逻辑：如果 >= 50，或者是后面紧跟生肖、分类等目标词（说明当前数字是金额），则视为隐式金额
+    const afterText = text.substring(match.index + match[0].length).trim();
+    const followedByTarget = /^[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
+
+    if (val >= 50 || followedByTarget) {
       allMatches.push({ index: match.index, length: match[0].length, keyword: 'implicit' });
     }
   }
@@ -393,24 +419,25 @@ function splitByAnchors(text: string): string[] {
     if (/\d+|[一二三四五六七八九十百]+/.test(remaining)) {
       const implicitMatch = remaining.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
       if (implicitMatch) {
-        // 隐式匹配也需要校验：如果是弱分割（空格），数字应 >= 50
+        // 隐式匹配也需要校验：如果是弱分割（空格），数字 >= 50 or 有非数字前缀
         const valStr = implicitMatch[2];
-        let isValid = true;
-        if (/^\d+$/.test(valStr)) {
-          const val = parseInt(valStr, 10);
-          if (val < 50) isValid = false;
+        const val = /^\d+$/.test(valStr) ? parseInt(valStr, 10) : chineseToNumber(valStr);
+        const hasSuffix = !!remaining.match(/(元|米|斤|块|位|个|一个)\D*$/);
+        const hasNonNumericPrefix = /[^\d\s,各，、；;。/*\-@.]/.test(implicitMatch[1]);
+        
+        let isValid = false;
+        if (val >= 50 || hasSuffix || hasNonNumericPrefix) {
+          isValid = true;
         }
         
         if (isValid) {
           segments.push(remaining);
-        } else if (segments.length > 0) {
-          segments[segments.length - 1] += ' ' + remaining;
         }
-      } else if (segments.length > 0) {
-        segments[segments.length - 1] += ' ' + remaining;
+      } else {
+        segments.push(remaining);
       }
-    } else if (segments.length > 0) {
-      segments[segments.length - 1] += ' ' + remaining;
+    } else {
+      segments.push(remaining);
     }
   }
   
@@ -474,18 +501,31 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     amountStr = bestMatch.amount;
   } else {
     // 兜底逻辑：找末尾数字 (隐式指令)
-    // 限制：如果是纯数字且无后缀，应 > 49，防止误伤 18各50 这种跨行指令的尾部数字
     const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(元|米|斤|块|位|个|一个)?\D*$/);
     if (tailMatch) {
       const candidateAmount = tailMatch[2];
       const hasSuffix = !!tailMatch[3];
+      const targetPrefix = tailMatch[1].trim();
+      const hasNonNumericTarget = /[^\d\s,各，、；;。/*\-@.]/.test(targetPrefix);
+      
       let isValid = true;
       if (!hasSuffix && /^\d+$/.test(candidateAmount)) {
         const val = parseInt(candidateAmount, 10);
-        if (val <= 49) isValid = false;
+        // 如果没有非数字目标，且金额 <= 49，
+        // 遵循用户指令：如果没有识别到金额符，则把数据最后一次认定成金额
+        if (val <= 49 && !hasNonNumericTarget) {
+          if (!targetPrefix) {
+            isValid = false;
+          } else {
+            // 用户指令非常明确：如果没有识别到金额符，则把数据最后一次认定成金额
+            // 为了满足这一要求，我们允许任何末尾数字作为金额，只要前面有内容
+            isValid = true;
+          }
+        }
       }
-      if (isValid) {
-        targetsStr = tailMatch[1].trim();
+      
+      if (isValid && targetPrefix) {
+        targetsStr = targetPrefix;
         amountStr = candidateAmount;
       }
     }
