@@ -1044,7 +1044,7 @@ export default function App() {
 
           <div className="flex-1 min-h-0 flex flex-col space-y-1">
             <div className="flex justify-between items-end">
-              <label className="text-lg font-serif font-bold italic">识别的结果 (RESULT):</label>
+              <label className="text-lg font-serif font-bold italic">识别的结果:</label>
               <span className="text-xs font-mono font-bold text-blue-600">
                 估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
               </span>
@@ -1083,7 +1083,7 @@ export default function App() {
               className="col-span-4 bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
             >
               <Plus size={18} />
-              保存下单 (SAVE)
+              保存下单
             </button>
             <button 
               onClick={() => handleParse(true, modalInputValue)} 
@@ -1140,11 +1140,11 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-gray-200 flex items-center justify-center overflow-hidden relative">
-      {/* App Container with fixed resolution */}
+    <div className="h-screen w-screen bg-gray-100 flex justify-center overflow-hidden relative">
+      {/* App Container with fixed width but full height */}
       <div 
-        style={{ width: appWidth, height: appHeight }}
-        className="bg-white text-[#141414] font-sans flex overflow-hidden relative shadow-2xl"
+        style={{ width: appWidth }}
+        className="h-full bg-white text-[#141414] font-sans flex overflow-hidden relative shadow-xl"
       >
         {/* Sidebar Toggle Button (Moved to Top-Left) */}
         <button 
@@ -1260,12 +1260,12 @@ export default function App() {
 
         <div className="flex-1 overflow-hidden p-4">
           <div className="h-full flex flex-col gap-4">
-            <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
+            <div className="grid grid-cols-14 gap-4 flex-1 min-h-0">
           {activeView === 'stats' ? (
             <>
               {/* Left Column: Number Distribution Matrix */}
               <div 
-                className="lg:col-span-6 flex flex-col h-full min-h-0"
+                className="lg:col-span-8 flex flex-col h-full min-h-0"
               >
                 <section className="bg-white border border-[#141414] p-4 h-full flex flex-col overflow-hidden">
                   <div className="flex flex-col gap-1 mb-4">
@@ -1415,7 +1415,7 @@ export default function App() {
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <History size={14} />
-                        <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest">最近流水</h2>
+                        <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest">录入流水</h2>
                       </div>
                       {financeRecords.length > 0 && (
                         <button 
@@ -1727,7 +1727,7 @@ export default function App() {
               </div>
 
               <div 
-                className="lg:col-span-8 flex flex-col h-full min-h-0"
+                className="lg:col-span-10 flex flex-col h-full min-h-0"
               >
                 <section className="bg-white border border-[#141414] p-4 flex flex-col h-full min-h-[400px]">
                   <div className="flex items-center justify-between mb-4">
@@ -2146,7 +2146,7 @@ export default function App() {
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
                   <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                  <p className="text-[10px] font-mono opacity-60">当前分辨率已锁定为 <span className="font-bold text-[#141414]">1420 x 930</span>，不支持手动修改。</p>
+                  <p className="text-[10px] font-mono opacity-60">当前分辨率已锁定为 <span className="font-bold text-[#141414]">1420 x 100%</span>，不支持手动修改。</p>
                 </div>
 
                 <button 
@@ -2166,7 +2166,7 @@ export default function App() {
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 transition-all"
                 >
-                  保存并关闭 (SAVE & CLOSE)
+                  保存并关闭
                 </button>
               </div>
             </motion.div>
