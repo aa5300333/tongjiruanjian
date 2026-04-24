@@ -78,7 +78,7 @@ export interface ParseResult {
 }
 
 export const STRONG_KEYWORDS = [
-  '各自', '各号', '各字', '个字', '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
+  '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
 ];
 // 弱关键字：仅在数字 >= 50 或有币种后缀时才视为金额锚点
 export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X'];
@@ -500,6 +500,14 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;
+
+    // 先移除所有已知的切割/金额关键词，防止它们被转换成数字（如“一个” -> “1个” -> “01”）
+    const sortedKws = [...ALL_KEYWORDS].sort((a, b) => b.length - a.length);
+    sortedKws.forEach(kw => {
+      const kwRegex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      normalized = normalized.replace(kwRegex, ' ');
+    });
+
     normalized = normalized.replace(/肖/g, ' ');   // 移除单独的“肖”字
     normalized = normalized.replace(/合数/g, '合'); // 统一将“合数”转换为“合”
 
@@ -767,6 +775,29 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     // 3. 大小单双 & 特殊组合逻辑 (移至生肖之前，防止“反数”中的“数”被识别为生肖)
     const combinations = [
+      { key: '绿波单', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n % 2 !== 0 },
+      { key: '绿波双', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n % 2 === 0 },
+      { key: '蓝波单', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n % 2 !== 0 },
+      { key: '蓝波双', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n % 2 === 0 },
+      { key: '红波单', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n % 2 !== 0 },
+      { key: '红波双', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n % 2 === 0 },
+      { key: '合单小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n <= 24; } },
+      { key: '合双小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n <= 24; } },
+      { key: '合单大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n >= 25; } },
+      { key: '合双大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n >= 25; } },
+      { key: '合单单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n % 2 !== 0; } },
+      { key: '合单双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n % 2 === 0; } },
+      { key: '合双单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n % 2 !== 0; } },
+      { key: '合双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n % 2 === 0; } },
+      { key: '蓝波小', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n <= 24 },
+      { key: '蓝波大', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n >= 25 },
+      { key: '红波小', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n <= 24 },
+      { key: '红波大', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n >= 25 },
+      { key: '绿波小', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n <= 24 },
+      { key: '绿波大', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n >= 25 },
+      { key: '蓝波数', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '红波数', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) },
+      { key: '绿波数', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
       { key: '大单', filter: (n: number) => n >= 25 && n % 2 !== 0 },
       { key: '大双', filter: (n: number) => n >= 25 && n % 2 === 0 },
       { key: '小单', filter: (n: number) => n <= 24 && n % 2 !== 0 },

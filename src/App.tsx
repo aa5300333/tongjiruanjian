@@ -20,7 +20,8 @@ import {
   Copy,
   Upload,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import XLSX from 'xlsx-js-style';
@@ -583,14 +584,14 @@ export default function App() {
     if (requireUndoPasteConfirm) {
       setUndoCallback({ 
         fn: async () => {
-          handleReset(true);
+          handleReset(true, true);
           await handlePasteAndRecognize();
         }, 
-        label: "确定清空所有数据并粘贴新内容？" 
+        label: "确定清空当前流水数据并粘贴新内容？" 
       });
       setShowLastUndoConfirm(true);
     } else {
-      handleReset(true);
+      handleReset(true, true);
       handlePasteAndRecognize();
     }
   };
@@ -615,13 +616,17 @@ export default function App() {
     }
   };
 
-  const handleReset = (keepRiskNumbers: boolean = false) => {
+  const handleReset = (keepRiskNumbers: boolean = false, keepSpecialNumbers: boolean = false) => {
     if (activeView === 'stats') {
       setFinanceBetData(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])));
       setFinanceRecords([]);
-      setSpecialNumber(null);
-      setAuxSpecialNumber(null);
-      setAuxSpecialNumberInput('');
+      
+      if (!keepSpecialNumbers) {
+        setSpecialNumber(null);
+        setAuxSpecialNumber(null);
+        setAuxSpecialNumberInput('');
+      }
+
       // 同时清空风险号码，除非明确要求保留
       if (!keepRiskNumbers) {
         setRiskNumbers(Array(15).fill(''));
@@ -657,6 +662,10 @@ export default function App() {
         }, 1500);
       }
     });
+  };
+
+  const handleClearBoard = () => {
+    setFinanceBetData(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])));
   };
 
   const handleExport = () => {
@@ -1287,6 +1296,13 @@ export default function App() {
                         >
                           <Copy size={12} />
                           复制数据
+                        </button>
+                        <button 
+                          onClick={handleClearBoard}
+                          className="flex items-center gap-1.5 px-2 py-1 bg-red-600 text-white text-[10px] font-mono hover:bg-red-700 transition-all"
+                        >
+                          <Trash2 size={12} />
+                          清空面板
                         </button>
                       </div>
                     </div>
