@@ -88,7 +88,7 @@ export default function App() {
     const saved = localStorage.getItem('rebate');
     return saved ? parseFloat(saved) : 4;
   });
-  const appWidth = 1620;
+  const appWidth = 1420;
   const appHeight = 930;
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
@@ -1140,86 +1140,108 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen bg-white text-[#141414] font-sans flex overflow-hidden relative">
-      {/* Sidebar Toggle Button (Moved to Top-Left) */}
-      <button 
-        onClick={() => setIsSidebarVisible(!isSidebarVisible)}
-        className="fixed left-2 top-2 z-[60] bg-gray-100 text-gray-500 p-1.5 hover:bg-gray-200 transition-all rounded shadow-sm flex items-center justify-center border border-gray-300"
-        title={isSidebarVisible ? "隐藏侧边栏" : "显示侧边栏"}
+    <div className="h-screen w-screen bg-gray-200 flex items-center justify-center overflow-hidden relative">
+      {/* App Container with fixed resolution */}
+      <div 
+        style={{ width: appWidth, height: appHeight }}
+        className="bg-white text-[#141414] font-sans flex overflow-hidden relative shadow-2xl"
       >
-        {isSidebarVisible ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
-      </button>
+        {/* Sidebar Toggle Button (Moved to Top-Left) */}
+        <button 
+          onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+          className="absolute left-2 top-2 z-[60] bg-gray-100 text-gray-500 p-1.5 hover:bg-gray-200 transition-all rounded shadow-sm flex items-center justify-center border border-gray-300"
+          title={isSidebarVisible ? "隐藏侧边栏" : "显示侧边栏"}
+        >
+          {isSidebarVisible ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+        </button>
 
-      {/* Sidebar Navigation */}
-      <aside 
-        className="flex-shrink-0 bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-20 overflow-hidden"
-        style={{ width: isSidebarVisible ? '200px' : '0px', transition: 'width 0.3s ease-in-out' }}
-      >
-        <div className="w-[200px] flex flex-col h-full">
-          <div className="p-6 border-b border-gray-200">
-            <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
-            <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4 Professional</p>
-          </div>
-          
-          <nav className="flex-1 p-3 space-y-2">
-            <div className="space-y-1">
-              <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">主要功能</label>
-              <button 
-                onClick={() => setActiveView('stats')}
-                className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+        {/* Sidebar Navigation (Overlay Mode) */}
+        <AnimatePresence>
+          {isSidebarVisible && (
+            <>
+              {/* Overlay Background */}
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsSidebarVisible(false)}
+                className="absolute inset-0 bg-black/20 z-[45] backdrop-blur-[1px]"
+              />
+              <motion.aside 
+                initial={{ x: -200 }}
+                animate={{ x: 0 }}
+                exit={{ x: -200 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="absolute left-0 top-0 h-full w-[200px] bg-[#f5f5f5] border-r border-gray-200 flex flex-col z-50 shadow-2xl"
               >
-                <Calculator size={18} />
-                <span className="text-sm font-bold">财务统计</span>
-              </button>
-              <button 
-                onClick={() => setActiveView('compound')}
-                className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
-              >
-                <TrendingUp size={18} />
-                <span className="text-sm font-bold">复式管理</span>
-              </button>
-            </div>
+                <div className="flex flex-col h-full">
+                  <div className="p-6 border-b border-gray-200">
+                    <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-gray-800">财务智能统计</h1>
+                    <p className="text-[9px] font-mono opacity-50 mt-1 uppercase">v2.4</p>
+                  </div>
+                  
+                  <nav className="flex-1 p-3 space-y-2">
+                    <div className="space-y-1">
+                      <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">主要功能</label>
+                      <button 
+                        onClick={() => { setActiveView('stats'); setIsSidebarVisible(false); }}
+                        className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'stats' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+                      >
+                        <Calculator size={18} />
+                        <span className="text-sm font-bold">财务统计</span>
+                      </button>
+                      <button 
+                        onClick={() => { setActiveView('compound'); setIsSidebarVisible(false); }}
+                        className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'compound' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+                      >
+                        <TrendingUp size={18} />
+                        <span className="text-sm font-bold">复式管理</span>
+                      </button>
+                    </div>
 
-            <div className="pt-4 space-y-1">
-              <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">数据操作</label>
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-black/5 transition-all"
-              >
-                <Settings size={18} />
-                <span className="text-sm font-bold">系统设置</span>
-              </button>
-              <button 
-                onClick={handleExport}
-                className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 transition-all"
-              >
-                <Download size={18} />
-                <span className="text-sm font-bold">导出报表</span>
-              </button>
-              <button 
-                onClick={() => setShowResetConfirm(true)}
-                className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-red-50 text-red-700 hover:text-red-800 transition-all"
-              >
-                <RotateCcw size={18} />
-                <span className="text-sm font-bold">一键清零</span>
-              </button>
-            </div>
-          </nav>
+                    <div className="pt-4 space-y-1">
+                      <label className="px-3 text-[9px] font-mono font-bold uppercase opacity-40">数据操作</label>
+                      <button 
+                        onClick={() => { setIsSettingsOpen(true); setIsSidebarVisible(false); }}
+                        className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-black/5 transition-all"
+                      >
+                        <Settings size={18} />
+                        <span className="text-sm font-bold">系统设置</span>
+                      </button>
+                      <button 
+                        onClick={() => { handleExport(); setIsSidebarVisible(false); }}
+                        className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 transition-all"
+                      >
+                        <Download size={18} />
+                        <span className="text-sm font-bold">导出报表</span>
+                      </button>
+                      <button 
+                        onClick={() => { setShowResetConfirm(true); setIsSidebarVisible(false); }}
+                        className="w-full h-11 flex items-center gap-3 px-4 rounded-md text-gray-600 hover:bg-red-50 text-red-700 hover:text-red-800 transition-all"
+                      >
+                        <RotateCcw size={18} />
+                        <span className="text-sm font-bold">一键清零</span>
+                      </button>
+                    </div>
+                  </nav>
 
-          <div className="p-4 border-t border-gray-200">
-             <div className="flex items-center gap-2 mb-3">
-                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-mono font-bold opacity-70">系统在线</span>
-             </div>
-             <div className="text-[10px] font-mono opacity-30">
-                © 2026 LOTTERY SYSTEM
-             </div>
-          </div>
-        </div>
-      </aside>
+                  <div className="p-4 border-t border-gray-200">
+                    <div className="flex items-center gap-2 mb-3">
+                        <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                        <span className="text-[10px] font-mono font-bold opacity-70">系统在线</span>
+                    </div>
+                    <div className="text-[10px] font-mono opacity-30">
+                        © 2026 LOTTERY SYSTEM
+                    </div>
+                  </div>
+                </div>
+              </motion.aside>
+            </>
+          )}
+        </AnimatePresence>
 
-      {/* Main Workspace Frame */}
-      <main className="flex-1 flex flex-col min-w-0 bg-white">
+        {/* Main Workspace Frame */}
+        <main className="w-full flex flex-col min-w-0 bg-white">
         {error && (
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
@@ -1511,7 +1533,7 @@ export default function App() {
                       className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
                     >
                       <Plus size={20} />
-                      录入下注 (RECORD)
+                      录入下注
                     </button>
                   </div>
                 </section>
@@ -1551,7 +1573,7 @@ export default function App() {
                       className="w-full text-[#141414] py-4 font-mono text-base font-bold hover:bg-gray-100 transition-all active:translate-y-1 flex items-center justify-center gap-2 border-2 border-[#141414] border-dashed"
                     >
                       <AlertCircle size={20} />
-                      今日特别注意号码 (RISK)
+                      今日特别注意号码
                     </button>
                   </div>
                 </section>
@@ -1567,7 +1589,7 @@ export default function App() {
                     <h2 className="text-[10px] font-mono font-bold uppercase tracking-widest">风险值预警排名 (由亏到赚)</h2>
                   </div>
 
-                  <div className="flex-1 space-y-0 pr-1">
+                  <div className="flex-1 space-y-0 pr-1 overflow-y-auto">
                     {(() => {
                       const totalNet = financeRecords.reduce((sum, rec) => {
                         const recGross = rec.items.reduce((s, item) => s + (item.amount * item.targets.length), 0);
@@ -1833,8 +1855,8 @@ export default function App() {
                               >
                                 <span className="text-sm font-mono font-bold mb-4">确认撤回此条复式记录?</span>
                                 <div className="flex gap-6">
-                                  <button onClick={() => handleUndo(record.id)} className="px-8 py-2 bg-white text-red-600 font-mono font-bold hover:bg-opacity-90">是 (YES)</button>
-                                  <button onClick={() => setConfirmingUndoId(null)} className="px-8 py-2 border-2 border-white text-white font-mono font-bold hover:bg-white hover:text-red-600">否 (NO)</button>
+                                  <button onClick={() => handleUndo(record.id)} className="px-8 py-2 bg-white text-red-600 font-mono font-bold hover:bg-opacity-90">是</button>
+                                  <button onClick={() => setConfirmingUndoId(null)} className="px-8 py-2 border-2 border-white text-white font-mono font-bold hover:bg-white hover:text-red-600">否</button>
                                 </div>
                               </motion.div>
                             )}
@@ -1908,7 +1930,7 @@ export default function App() {
                 {/* Bottom Window: Display */}
                 <div className="flex-1 flex flex-col space-y-1 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别的结果 (RESULT):</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别的结果:</label>
                     {modalInputValue.trim() && (
                       <span className="text-xl font-mono font-bold text-blue-600">
                         估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
@@ -1969,7 +1991,7 @@ export default function App() {
                   className="col-span-4 bg-[#141414] hover:bg-[#2a2a2a] text-white border border-[#141414] py-4 text-sm font-bold transition-all active:bg-black flex items-center justify-center gap-2 rounded-none shadow-md disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale disabled:border-gray-400"
                 >
                   <Plus size={18} />
-                  保存下单 (SAVE)
+                  保存下单
                 </button>
                 <button 
                   onClick={() => handleParse(true, modalInputValue)}
@@ -2042,7 +2064,7 @@ export default function App() {
               <div className="bg-[#141414] text-[#E4E3E0] p-4 flex justify-between items-center">
                 <h3 className="text-sm font-mono font-bold uppercase tracking-widest flex items-center gap-2">
                   <Settings size={16} />
-                  系统设置 (SETTINGS)
+                  系统设置
                 </h3>
                 <button 
                   onClick={() => setIsSettingsOpen(false)}
@@ -2124,7 +2146,7 @@ export default function App() {
 
                 <div className="space-y-4 pt-2 border-t border-gray-100">
                   <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                  <p className="text-[10px] font-mono opacity-60">当前分辨率已锁定为 <span className="font-bold text-[#141414]">1620 x 930</span>，不支持手动修改。</p>
+                  <p className="text-[10px] font-mono opacity-60">当前分辨率已锁定为 <span className="font-bold text-[#141414]">1420 x 930</span>，不支持手动修改。</p>
                 </div>
 
                 <button 
@@ -2343,6 +2365,7 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

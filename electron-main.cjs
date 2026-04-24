@@ -3,11 +3,11 @@ const path = require('path');
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1620,
+    width: 1420,
     height: 930,
-    minWidth: 1620,
+    minWidth: 1420,
     minHeight: 930,
-    maxWidth: 1620,
+    maxWidth: 1420,
     maxHeight: 930,
     resizable: false,
     title: "财务智能统计软件",
