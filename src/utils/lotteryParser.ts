@@ -576,8 +576,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     // 特殊处理：将 "0 1 2头", "345尾", "尾345" 等转换成 "0头 1头 2头" 格式显示
     // 逻辑：寻找数字加上分隔符的组合，后面接头尾；或头尾后面接数字组合
-    // 优化正则，防止灾难性回溯 (不再使用嵌套量词)
-    const headTailRegex = /(\d+(?:[\s.，、\-\/@*。]+\d+)*)\s*([头尾])|([头尾])\s*(\d+(?:[\s.，、\-\/@*。]+\d+)*)/g;
+    // 优化正则，允许数字与头尾之间存在分隔符（如 "3、2、5、尾"）
+    const headTailRegex = /(\d+(?:[\s.，、\-\/@*。]+\d+)*)[\s.，、\-\/@*。]*([头尾])|([头尾])[\s.，、\-\/@*。]*(\d+(?:[\s.，、\-\/@*。]+\d+)*)/g;
     normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
       const p = pSuffix || pPrefix;
       const suffix = suffixStr || prefixStr;
