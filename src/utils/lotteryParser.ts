@@ -210,6 +210,11 @@ export function parseInput(input: string): ParseResult[] {
       pattern: new RegExp(key, 'g'),
       replacement: val
     })),
+    // 移除 [ ] 括起来的中括号内容，通常是杂质
+    { pattern: /[\[\]]/g, replacement: ' ' },
+    // 在生肖和数字之间由于粘贴等原因没有空格时，自动补上空格
+    { pattern: /([马蛇龙兔虎牛鼠猪狗鸡猴羊])(?=\d)/g, replacement: '$1 ' },
+    { pattern: /(\d)(?=[马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, replacement: '$1 ' },
     // 修复 "01到12" 被冒号断开的问题：将 "门：01到12" 类型的标签冒号暂时移位或移除
     { pattern: /门[：:](?=\d)/g, replacement: '门 ' },
   ];
@@ -292,7 +297,7 @@ function checkHasAnchor(text: string): boolean {
   if (weakRegex.test(text) && (/\d+/.test(text) && parseInt(text.match(/\d+/)?.[0] || '0', 10) >= 50 || /[元米斤块位个一个]/.test(text))) return true;
 
   // 隐式金额点
-  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})/g;
+  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@])(\d{2,})/g;
   let m;
   while ((m = implicitRegex.exec(text)) !== null) {
     const val = parseInt(m[1], 10);
@@ -329,7 +334,7 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'gi');
 
-  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})/g;
+  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@])(\d{2,})/g;
 
   const matches: { index: number, length: number, keyword: string }[] = [];
   let m;
