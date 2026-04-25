@@ -590,10 +590,10 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
       const p = pSuffix || pPrefix;
       const suffix = suffixStr || prefixStr;
-      // 提取所有数字
-      const nums = p.match(/\d+/g);
-      if (nums) {
-        return nums.map(n => ` ${n}${suffix} `).join(' ');
+      // 提取所有数字。统一逻辑：如果是连写的数字串（如 369尾），将其拆分为单个数字以匹配解析逻辑
+      const digits = p.match(/\d/g);
+      if (digits) {
+        return digits.map(d => ` ${d}${suffix} `).join(' ');
       }
       return match;
     });
@@ -601,7 +601,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     return normalized
       .replace(whitelist, ' ')                    // 不在白名单内的全部替换为空格
       .replace(/([马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, ' $1 ') // 仅针对生肖字前后增加空格，实现生肖间的分离
-      .replace(/(\d+)(?![尾头])/g, ' $1 ')         // 确保普通数字前后有空格，排除尾/头
+      .replace(/(\d+)(?!\d|[尾头])/g, ' $1 ')      // 确保整个数字后面不接数字且不接尾/头时才加空格
       .replace(/(\d+[尾头])/g, ' $1 ')             // 确保“X尾/X头”作为一个整体前后有空格
       .replace(/\s+/g, ' ')                       // 合并多个空格
       .trim()
