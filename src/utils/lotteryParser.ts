@@ -246,6 +246,7 @@ export function parseInput(input: string): ParseResult[] {
   
   let buffer = '';
   for (const chunk of rawChunks) {
+    // 内部 cleanDisplayRaw 会处理标准化和特殊模式扩展
     const segments = splitByAnchors(chunk);
     
     if (segments.length > 0) {
@@ -561,6 +562,9 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     normalized = normalized.replace(/[兰篮]/g, '蓝');
     normalized = normalized.replace(/(红|蓝|绿)(?!波|单|双|大|小|合)/g, '$1波');
     
+    // 移除行首的分隔符
+    normalized = normalized.replace(/^[、，,。\s]+/gm, '');
+    
     // 2. 规整化：分类词 -> 标准名
     normalized = normalized.replace(/家禽|家肖|家兽|家/g, '家禽');
     normalized = normalized.replace(/野肖|野兽|野/g, '野肖');
@@ -576,14 +580,15 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     // 特殊处理：将 "0 1 2头", "345尾", "尾345" 等转换成 "0头 1头 2头" 格式显示
     // 逻辑：寻找数字加上分隔符的组合，后面接头尾；或头尾后面接数字组合
-    // 优化正则，允许数字与头尾之间存在分隔符（如 "3、2、5、尾"）
-    const headTailRegex = /(\d+(?:[\s.，、\-\/@*。]+\d+)*)[\s.，、\-\/@*。]*([头尾])|([头尾])[\s.，、\-\/@*。]*(\d+(?:[\s.，、\-\/@*。]+\d+)*)/g;
+    // 优化正则，允许数字与头尾之间存在更多种类的分隔符和杂质
+    const headTailRegex = /(\d+(?:[^\d\u4e00-\u9fa5]*\d+)*)[^\d\u4e00-\u9fa5]*([头尾])|([头尾])[^\d\u4e00-\u9fa5]*(\d+(?:[^\d\u4e00-\u9fa5]*\d+)*)/g;
     normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
       const p = pSuffix || pPrefix;
       const suffix = suffixStr || prefixStr;
-      const digits = p.match(/\d/g);
-      if (digits) {
-        return digits.map(d => ` ${d}${suffix} `).join(' ');
+      // 提取所有数字
+      const nums = p.match(/\d+/g);
+      if (nums) {
+        return nums.map(n => ` ${n}${suffix} `).join(' ');
       }
       return match;
     });

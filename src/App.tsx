@@ -1305,7 +1305,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center justify-between mt-1 mb-2">
                       <div className="flex items-center gap-4">
-                        <span className="text-xl font-mono font-bold text-black">总和</span>
+                        <span className="text-xl font-mono font-bold text-gray-400">总和</span>
                         <span className="text-4xl font-mono font-extrabold text-black">¥{totalTurnover.toLocaleString()}</span>
                       </div>
 
