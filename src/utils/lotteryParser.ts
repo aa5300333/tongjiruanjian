@@ -35,6 +35,8 @@ export const HOMOPHONES: Record<string, string> = {
   '九': '9',
   '实': '10',
   '十': '10',
+  'O': '0',
+  'o': '0',
 };
 
 export const ZODIAC_HOMOPHONES: Record<string, string[]> = {
@@ -179,6 +181,14 @@ function smartSplitDigits(nStr: string): number[] {
   return result;
 }
 
+const IGNORE_TARGETS = ['合计', '总计', '总共', '共计', '累计', '合计金额', '总额'];
+const HEADER_KEYWORDS = [
+  '新澳门', '澳门特码', '新奥特码', '澳门特', '澳门', '特码', '澳特', '特',
+  '上报数据明细', '数据明细', '明细', '报单', '报单明细', '清单', '下注清单',
+  '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报',
+  'Vz-HuiPu-PC', '图', '港'
+];
+
 /**
  * 解析输入字符串
  * 遵循用户最新指令：
@@ -192,16 +202,14 @@ export function parseInput(input: string): ParseResult[] {
   
   // 扩充关键词库，涵盖所有对话中出现的变体
   const KEYWORDS = ALL_KEYWORDS;
-  const IGNORE_TARGETS = ['合计', '总计', '总共', '共计', '累计', '合计金额', '总额'];
-  const HEADER_KEYWORDS = [
-    '新澳门', '澳门特码', '新奥特码', '澳门特', '澳门', '特码', '澳特', '特',
-    '上报数据明细', '数据明细', '明细', '报单', '报单明细', '清单', '下注清单',
-    '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报',
-    'Vz-HuiPu-PC', '图', '港'
-  ];
 
   // 1. 识别库：处理已知的特殊模式或错误纠回
   const RECOGNITION_LIBRARY: Array<{ pattern: RegExp, replacement: string | ((...args: any[]) => string) }> = [
+    // 结合 HOMOPHONES 扩充识别库
+    ...Object.entries(HOMOPHONES).map(([key, val]) => ({
+      pattern: new RegExp(key, 'g'),
+      replacement: val
+    })),
     // 修复 "01到12" 被冒号断开的问题：将 "门：01到12" 类型的标签冒号暂时移位或移除
     { pattern: /门[：:](?=\d)/g, replacement: '门 ' },
   ];
@@ -213,40 +221,25 @@ export function parseInput(input: string): ParseResult[] {
   
   // 2. 移除汇总信息和报头信息
   const sortedIgnore = [...IGNORE_TARGETS].sort((a, b) => b.length - a.length);
-  const summaryRegex = new RegExp(`(?:${sortedIgnore.join('|')})[:：]?\\s*(?:共|额|金额)?\\s*\\d+\\s*元?(?![=：＝:各个字每打买下xX￥/])`, 'gi');
-  const headerRegex = new RegExp(`(?:^|[\\s。，,])(?:${HEADER_KEYWORDS.sort((a, b) => b.length - a.length).join('|')})[:：]?`, 'gi');
+  const summaryRegex = new RegExp(`^\\s*(?:${sortedIgnore.join('|')})[^\\n]*`, 'gm');
+  const withoutSummary = preProcessed.replace(summaryRegex, '');
   
-  // 修改：替换时保留原有空白符中的换行，防止行合并导致解析紊乱
-  let cleanedInput = preProcessed.replace(summaryRegex, '');
-  cleanedInput = cleanedInput.replace(headerRegex, (match) => {
-    if (match.includes('\n')) return '\n ';
-    if (match.includes('\r')) return '\r ';
-    return ' ';
+  const sortedHeader = [...HEADER_KEYWORDS].sort((a, b) => b.length - a.length);
+  // 允许 Header 后直接跟数字或其它内容
+  const headerRegex = new RegExp(`^\\s*(?:${sortedHeader.join('|')})[：:\\s]*`, 'gm');
+  const cleaned = withoutSummary.replace(headerRegex, '');
+
+  // 3. 范围处理 (e.g. 1到5各10)
+  const rangeProcessed = cleaned.replace(/(\d+)\s*(?:到|至)\s*(\d+)\s*(各|字|买|下|压)/g, (match, start, end, suffix) => {
+    const s = parseInt(start, 10);
+    const e = parseInt(end, 10);
+    if (isNaN(s) || isNaN(e) || s > e || e > 49) return match;
+    const nums = [];
+    for (let n = s; n <= e; n++) nums.push(n.toString().padStart(2, '0'));
+    return nums.join(' ') + suffix;
   });
 
-  // 2. 处理 "X到Y"
-  const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*到\s*(\d+|[一二三四五六七八九十百]+)/g;
-  let rangeProcessed = cleanedInput.replace(rangeRegex, (match, p1, p2) => {
-    const start = /\d/.test(p1) ? parseInt(p1, 10) : chineseToNumber(p1);
-    const end = /\d/.test(p2) ? parseInt(p2, 10) : chineseToNumber(p2);
-    // 如果是非常明显的下注范围（1到49内），则保留原始格式供后面 parseSegment 解析
-    if (start >= 1 && start <= 49 && end >= 1 && end <= 49) {
-      return match;
-    }
-    // 否则（如 1-100），视为“1到49各100”这种隐含指令的变体
-    if (end >= 50) {
-      return `${p1}各${p2}`;
-    }
-    return match;
-  });
-
-  // 3. 剥离行首的字母标签 (如 a: x: s:)，防止其被误认为金额关键字或干扰解析
-  rangeProcessed = rangeProcessed.replace(/(?:^|[\n\r，,;；])\s*([a-zA-Z])[:：]\s*/g, (match, p1) => {
-    // 如果是单个字母标签，将其移除以保持数据纯净
-    return match.startsWith('\n') || match.startsWith('\r') ? '\n ' : ' ';
-  });
-
-  const rawChunks = rangeProcessed.split(/[\n\r;；,，]+/).map(l => l.trim()).filter(l => l);
+  const rawChunks = rangeProcessed.split(/[\n\r;；。]+/).map(l => l.trim()).filter(l => l);
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
@@ -257,9 +250,7 @@ export function parseInput(input: string): ParseResult[] {
     
     if (segments.length > 0) {
       for (const seg of segments) {
-        // 如果 segment 自身包含锚点，说明它一定能终结之前的目标列表
         const hasAnchor = checkHasAnchor(seg);
-        
         if (hasAnchor) {
           const combined = buffer ? `${buffer} ${seg}` : seg;
           const results = parseSegment(combined, KEYWORDS, COMBO_KEYWORDS);
@@ -267,21 +258,17 @@ export function parseInput(input: string): ParseResult[] {
             allResults.push(...results);
             buffer = '';
           } else {
-            // 如果带锚点解析仍失败（可能数据还没全），则继续 buffer
             buffer = combined;
           }
         } else {
-          // 不含锚点，说明是目标列表的一部分，继续累积
           buffer = buffer ? `${buffer} ${seg}` : seg;
         }
       }
     } else {
-      // 既无锚点，也无特殊格式，视为前缀，继续 buffer
       buffer = buffer ? `${buffer} ${chunk}` : chunk;
     }
   }
   
-  // 最后处理可能残留在 buffer 里的指令
   if (buffer) {
     const finalRes = parseSegment(buffer, KEYWORDS, COMBO_KEYWORDS);
     if (finalRes) allResults.push(...finalRes);
@@ -304,79 +291,81 @@ function checkHasAnchor(text: string): boolean {
   if (weakRegex.test(text) && (/\d+/.test(text) && parseInt(text.match(/\d+/)?.[0] || '0', 10) >= 50 || /[元米斤块位个一个]/.test(text))) return true;
 
   // 隐式金额点
-  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})(?!\s*[.\d各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰])/g;
+  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})/g;
   let m;
   while ((m = implicitRegex.exec(text)) !== null) {
     const val = parseInt(m[1], 10);
+    const beforeText = text.substring(0, m.index);
+    const afterText = text.substring(m.index + m[0].length);
+    
+    // 如果 >= 50，则是强力金额锚点
     if (val >= 50) return true;
-    
-    // 如果数字位于文本末尾，且前面有实质性内容（非空），则视为可能是一个完整的隐式指令
-    const isAtEnd = (m.index + m[0].length >= text.length - 1);
-    const hasTargetContent = /[^\d\s,各，、；;。/*\-@.]/.test(text.substring(0, m.index));
-    // 即使全数字，如果数字数量 >= 2，最后一个也可能是金额
-    const allDigits = text.match(/\d+/g) || [];
-    
-    if (isAtEnd && (hasTargetContent || allDigits.length >= 2)) return true;
+
+    // 如果 < 50, 需要更严格判定：
+    // 必须要跟禁词区分 (禁词包括分隔符，表示它后面还有数据，所以当前数字大概率不是金额)
+    const followedByForbid = /^\s*[.\d,，各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰]/.test(afterText);
+    const followedByTarget = /^\s*[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
+    const hasTargetBefore = /[^\d\s,，、；;。/*\-@.]/.test(beforeText);
+
+    if (!followedByForbid) {
+      // 只有在末尾（或后面跟目标词）且前面有非数字内容的情况下才判定
+      if ((afterText.trim() === '' || followedByTarget) && hasTargetBefore) return true;
+    }
   }
   
   return false;
 }
 
 /**
- * 金额锚点切分算法
- * 寻找所有可能的金额点，并将之前的文本归为该金额的目标
+ * 寻找字符串中的所有金额锚点位置
  */
-function splitByAnchors(text: string): string[] {
-  const segments: string[] = [];
-  
+function findAllAnchors(text: string): { index: number, length: number, keyword: string }[] {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\\s元米斤块位个一个]*`, 'gi');
+
   const sortedWeak = [...WEAK_KEYWORDS].sort((a, b) => b.length - a.length);
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'gi');
 
-  // 匹配强关键字：后面跟着数字即可
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\\s元米斤块位个一个]*`, 'g');
-  
-  // 匹配弱关键字：需满足特定条件（>49 或有后缀）
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'g');
+  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})/g;
 
-  // 匹配隐式金额锚点 (数据 + 金额)
-  // 金额判定阈值统一为 >= 50
-  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.])(\d{2,})(?!\s*[.\d各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰])/g;
+  const matches: { index: number, length: number, keyword: string }[] = [];
+  let m;
 
-  const allMatches: { index: number, length: number, keyword: string }[] = [];
-  
-  let match;
-  while ((match = strongRegex.exec(text)) !== null) {
-    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] });
+  while ((m = strongRegex.exec(text)) !== null) {
+    matches.push({ index: m.index, length: m[0].length, keyword: m[1] });
   }
-  
-  while ((match = weakRegex.exec(text)) !== null) {
-    // 对于弱匹配，如果后面紧跟“到”，则忽略（可能是范围：12:15到20）
-    const after = text.substring(match.index + match[0].length, match.index + match[0].length + 5);
-    if (after.includes('到')) continue;
-    
-    // 如果是纯数字且 <= 49，且没有后缀，则忽略
-    const amountStr = match[2] || match[3] || match[6] || match[8];
-    const hasSuffix = !!match[4];
-    if (!hasSuffix && /^\d+$/.test(amountStr)) {
-      const val = parseInt(amountStr, 10);
-      if (val <= 49) continue;
+  while ((m = weakRegex.exec(text)) !== null) {
+    const amountStr = m[2] || m[3] || m[6] || m[8];
+    const val = parseInt(amountStr, 10);
+    const hasSuffix = !!m[4];
+    if (val >= 50 || hasSuffix) {
+      matches.push({ index: m.index, length: m[0].length, keyword: m[1] || m[5] || m[7] });
     }
-    
-    allMatches.push({ index: match.index, length: match[0].length, keyword: match[1] || match[5] || match[7] });
+  }
+  while ((m = implicitRegex.exec(text)) !== null) {
+    const val = parseInt(m[1], 10);
+    const beforeText = text.substring(0, m.index);
+    const afterText = text.substring(m.index + m[0].length);
+    const followedByForbid = /^\s*[.\d,，各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰]/.test(afterText);
+    const followedByTarget = /^\s*[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
+    const hasTargetBefore = /[^\d\s,，、；;。/*\-@.]/.test(beforeText);
+
+    if (val >= 50 || (!followedByForbid && (afterText.trim() === '' || followedByTarget) && hasTargetBefore)) {
+      matches.push({ index: m.index, length: m[0].length, keyword: 'implicit' });
+    }
   }
 
-  while ((match = implicitRegex.exec(text)) !== null) {
-    const val = parseInt(match[1], 10);
-    // 逻辑：如果 >= 50，或者是后面紧跟生肖、分类等目标词（说明当前数字是金额），则视为隐式金额
-    const afterText = text.substring(match.index + match[0].length).trim();
-    const followedByTarget = /^[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
+  return matches.sort((a, b) => a.index - b.index);
+}
 
-    if (val >= 50 || followedByTarget) {
-      allMatches.push({ index: match.index, length: match[0].length, keyword: 'implicit' });
-    }
+function splitByAnchors(text: string): string[] {
+  const allMatches = findAllAnchors(text);
+  const segments: string[] = [];
+  
+  if (allMatches.length === 0) {
+    return [];
   }
 
   // 按位置排序
@@ -430,9 +419,7 @@ function splitByAnchors(text: string): string[] {
           isValid = true;
         }
         
-        if (isValid) {
-          segments.push(remaining);
-        }
+        segments.push(remaining);
       } else {
         segments.push(remaining);
       }
@@ -576,8 +563,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     
     // 2. 规整化：分类词 -> 标准名
     normalized = normalized.replace(/家禽|家肖|家兽|家/g, '家禽');
-    normalized = normalized.replace(/野肖|野兽|野/g, '野兽');
-    normalized = normalized.replace(/反字|反/g, '反数');
+    normalized = normalized.replace(/野肖|野兽|野/g, '野肖');
+    normalized = normalized.replace(/反数|反字|反/g, '反数');
 
     Object.entries(ZODIAC_HOMOPHONES).forEach(([real, variations]) => {
       variations.forEach(v => {
@@ -617,6 +604,9 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
         }
 
         if (/^\d+$/.test(part)) {
+          if (part === '0') {
+            return ['0尾'];
+          }
           if (part.length <= 2) {
             return [part.padStart(2, '0')];
           } else {
@@ -675,8 +665,15 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     const allNumbers: number[] = [];
     
     // 保护包含关键字的特殊组合 (如 '字', '数')，防止被后续的干扰词移除逻辑误删
-    const PROTECTED_COMBOS = ['倒反数', '反数', '反字', '反', '大数', '小数'];
+    const PROTECTED_COMBOS = ['倒反数', '反数', '反字', '倒反', '反', '大数', '小数'];
     let protectedStr = targetsStr;
+    
+    // 同时也移除可能在 targetsStr 中遗留的 Header
+    const sortedHead = [...HEADER_KEYWORDS].sort((a, b) => b.length - a.length);
+    sortedHead.forEach(h => {
+      protectedStr = protectedStr.replace(new RegExp(h, 'g'), ' ');
+    });
+
     PROTECTED_COMBOS.forEach((p, idx) => {
       protectedStr = protectedStr.replace(new RegExp(p, 'g'), `__PC_${idx}__`);
     });
@@ -709,7 +706,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     // 只要顶部的 ZODIAC_LIST 随年份更新（首位为当年生肖），此处逻辑将自动适配，无需手动修改号码。
     const CATEGORIES = [
       { key: ['家禽', '家肖', '家'], zodiacs: ['牛', '马', '羊', '鸡', '狗', '猪'] },
-      { key: ['野兽', '野肖', '野'], zodiacs: ['鼠', '虎', '兔', '龙', '蛇', '猴'] },
+      { key: ['野肖', '野兽', '野'], zodiacs: ['鼠', '虎', '兔', '龙', '蛇', '猴'] },
     ];
 
     CATEGORIES.forEach(cat => {
@@ -930,7 +927,14 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       numMatches.forEach(nStr => {
         if (nStr.length <= 2) {
           const n = parseInt(nStr, 10);
-          if (n >= 1 && n <= 49) allNumbers.push(n);
+          if (n >= 1 && n <= 49) {
+            allNumbers.push(n);
+          } else if (n === 0) {
+            // 特殊处理：单走一个 0 视为 0 尾
+            for (let j = 1; j <= 49; j++) {
+              if (j % 10 === 0) allNumbers.push(j);
+            }
+          }
         } else {
           // 使用智能拆分函数处理长数字串
           allNumbers.push(...smartSplitDigits(nStr));

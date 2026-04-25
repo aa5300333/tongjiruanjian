@@ -1285,10 +1285,6 @@ export default function App() {
                         <h2 className="text-xs font-mono font-bold uppercase tracking-widest">号码分布矩阵</h2>
                       </div>
                       <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[9px] font-mono opacity-50 uppercase">总和</span>
-                          <span className="text-lg font-mono font-bold">¥{totalTurnover.toLocaleString()}</span>
-                        </div>
                         <button 
                           id="copy-data-btn"
                           onClick={handleCopyData}
@@ -1307,73 +1303,80 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="text-[10px] font-mono opacity-50 uppercase">辅助特码</span>
-                      <input 
-                        type="text" 
-                        placeholder="01-49"
-                        value={auxSpecialNumberInput}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
-                          setAuxSpecialNumberInput(val);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                    <div className="flex items-center justify-between mt-1 mb-2">
+                      <div className="flex items-center gap-4">
+                        <span className="text-xl font-mono font-bold text-black">总和</span>
+                        <span className="text-4xl font-mono font-extrabold text-black">¥{totalTurnover.toLocaleString()}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono opacity-50 uppercase">辅助特码</span>
+                        <input 
+                          type="text" 
+                          placeholder="01-49"
+                          value={auxSpecialNumberInput}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                            setAuxSpecialNumberInput(val);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const val = parseInt(auxSpecialNumberInput);
+                              if (!isNaN(val) && val >= 1 && val <= 49) {
+                                setAuxSpecialNumber(val);
+                                (e.target as HTMLInputElement).blur();
+                              } else if (auxSpecialNumberInput === '') {
+                                setAuxSpecialNumber(null);
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }
+                          }}
+                          onBlur={() => {
                             const val = parseInt(auxSpecialNumberInput);
                             if (!isNaN(val) && val >= 1 && val <= 49) {
                               setAuxSpecialNumber(val);
-                              (e.target as HTMLInputElement).blur();
                             } else if (auxSpecialNumberInput === '') {
                               setAuxSpecialNumber(null);
-                              (e.target as HTMLInputElement).blur();
+                            } else {
+                              setAuxSpecialNumberInput(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
                             }
-                          }
-                        }}
-                        onBlur={() => {
-                          const val = parseInt(auxSpecialNumberInput);
-                          if (!isNaN(val) && val >= 1 && val <= 49) {
-                            setAuxSpecialNumber(val);
-                          } else if (auxSpecialNumberInput === '') {
-                            setAuxSpecialNumber(null);
-                          } else {
-                            setAuxSpecialNumberInput(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
-                          }
-                        }}
-                        className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-yellow-50' : ''}`}
-                      />
-                      <span className="text-[10px] font-mono opacity-50 uppercase">本期特码</span>
-                      <input 
-                        type="text" 
-                        placeholder="01-49"
-                        value={specialNumberInput}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
-                          setSpecialNumberInput(val);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                          }}
+                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-yellow-50' : ''}`}
+                        />
+                        <span className="text-[10px] font-mono opacity-50 uppercase ml-2">本期特码</span>
+                        <input 
+                          type="text" 
+                          placeholder="01-49"
+                          value={specialNumberInput}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                            setSpecialNumberInput(val);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const val = parseInt(specialNumberInput);
+                              if (!isNaN(val) && val >= 1 && val <= 49) {
+                                setSpecialNumber(val);
+                                (e.target as HTMLInputElement).blur();
+                              } else if (specialNumberInput === '') {
+                                setSpecialNumber(null);
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }
+                          }}
+                          onBlur={() => {
                             const val = parseInt(specialNumberInput);
                             if (!isNaN(val) && val >= 1 && val <= 49) {
                               setSpecialNumber(val);
-                              (e.target as HTMLInputElement).blur();
                             } else if (specialNumberInput === '') {
                               setSpecialNumber(null);
-                              (e.target as HTMLInputElement).blur();
+                            } else {
+                              setSpecialNumberInput(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
                             }
-                          }
-                        }}
-                        onBlur={() => {
-                          const val = parseInt(specialNumberInput);
-                          if (!isNaN(val) && val >= 1 && val <= 49) {
-                            setSpecialNumber(val);
-                          } else if (specialNumberInput === '') {
-                            setSpecialNumber(null);
-                          } else {
-                            setSpecialNumberInput(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
-                          }
-                        }}
-                        className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-gray-100' : ''}`}
-                      />
+                          }}
+                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-gray-100' : ''}`}
+                        />
+                      </div>
                     </div>
                   </div>
 
