@@ -1341,7 +1341,7 @@ export default function App() {
                               setAuxSpecialNumberInput(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
                             }
                           }}
-                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-yellow-50' : ''}`}
+                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-gray-100' : ''}`}
                         />
                         <span className="text-[10px] font-mono opacity-50 uppercase ml-2">本期特码</span>
                         <input 
@@ -1374,7 +1374,7 @@ export default function App() {
                               setSpecialNumberInput(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
                             }
                           }}
-                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-gray-100' : ''}`}
+                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-yellow-50' : ''}`}
                         />
                       </div>
                     </div>
@@ -1411,7 +1411,7 @@ export default function App() {
                         return (
                           <div 
                             key={num}
-                            className={`flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded lottery-table ${isSpecial ? 'bg-gray-300 ring-2 ring-gray-400 font-bold' : ''} ${isAux ? 'bg-yellow-300 ring-2 ring-yellow-400 font-bold' : ''}`}
+                            className={`flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded lottery-table ${isSpecial ? 'bg-yellow-300 ring-2 ring-yellow-400 font-bold' : ''} ${isAux ? 'bg-gray-300 ring-2 ring-gray-400 font-bold' : ''}`}
                           >
                             <div className="flex items-center gap-1 min-w-[42px]">
                               <span className={`text-base font-serif font-bold ${textColor}`}>
