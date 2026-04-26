@@ -88,26 +88,32 @@ function chineseToNumber(chinese: string): number {
   
   const map: Record<string, number> = {
     '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
-    '十': 10, '百': 100
+    '十': 10, '百': 100, '千': 1000, '万': 10000
   };
   
   let result = 0;
   let temp = 0;
+  let section = 0;
   
   for (let i = 0; i < chinese.length; i++) {
     const char = chinese[i];
     const val = map[char];
     if (val === undefined) continue;
     
-    if (val === 10 || val === 100) {
+    if (val === 10 || val === 100 || val === 1000) {
       if (temp === 0) temp = 1;
-      result += temp * val;
+      section += temp * val;
+      temp = 0;
+    } else if (val === 10000) {
+      if (temp === 0 && section === 0) temp = 1;
+      result += (section + temp) * val;
+      section = 0;
       temp = 0;
     } else {
       temp = val;
     }
   }
-  return result + temp;
+  return result + section + temp;
 }
 
 /**
@@ -276,11 +282,11 @@ export function parseInput(input: string): ParseResult[] {
 function checkHasAnchor(text: string): boolean {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))`, 'g');
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'g');
   if (strongRegex.test(text)) return true;
 
   const weakPattern = WEAK_KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))`, 'g');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'g');
   
   // 对于“号”字做特殊判定：
   let m;
@@ -292,11 +298,11 @@ function checkHasAnchor(text: string): boolean {
     if (keyword === '号') {
       const beforeChar = text.substring(0, matchIndex).trim().slice(-1);
       // 如果前方是数字，则不视为金额锚点 (作为数据分隔符)
-      if (/[\d一二三四五六七八九十百]/.test(beforeChar)) {
+      if (/[\d一二三四五六七八九十百千万]/.test(beforeChar)) {
         continue;
       }
       // 如果前方是其他汉字，作为金额分隔符 (视为金额锚点，或者作为特殊标记)
-      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百]/.test(beforeChar)) {
+      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百千万]/.test(beforeChar)) {
         return true; 
       }
     }
@@ -306,10 +312,10 @@ function checkHasAnchor(text: string): boolean {
   }
 
   // 特殊识别：数字 + 元
-  if (/(?:\d+|[一二三四五六七八九十百]+)\s*元/.test(text)) return true;
+  if (/(?:\d+|[一二三四五六七八九十百千万]+)\s*元/.test(text)) return true;
 
   // 默认换行符前一个数字为金额
-  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\s,，、。#\-/*@.]*$/gi;
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.]*$/gi;
   const eolMatch = endOfLineAmountRegex.exec(text);
   if (eolMatch) {
     const amountStr = eolMatch[1] || eolMatch[2];
@@ -338,15 +344,15 @@ function checkHasAnchor(text: string): boolean {
 function findAllAnchors(text: string): { index: number, length: number, keyword: string }[] {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\\s元米斤块位个一个]*`, 'gi');
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个]*`, 'gi');
 
   const sortedWeak = [...WEAK_KEYWORDS].sort((a, b) => b.length - a.length);
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'gi');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百千万]+)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'gi');
 
-  const yuanSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\s*元/gi;
+  const yuanSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/gi;
   const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.[\]()【】])(\d{2,})/g;
-  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\s,，、。#\-/*@.]*$/gi;
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.]*$/gi;
 
   const matches: { index: number, length: number, keyword: string }[] = [];
   let m;
@@ -363,11 +369,11 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
     // “号”字特判：
     if (keyword === '号') {
       const beforeChar = text.substring(0, m.index).trim().slice(-1);
-      if (/[\d一二三四五六七八九十百]/.test(beforeChar)) {
+      if (/[\d一二三四五六七八九十百千万]/.test(beforeChar)) {
         // 作为数据分隔符，跳过金额锚点识别
         continue;
       }
-      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百]/.test(beforeChar)) {
+      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百千万]/.test(beforeChar)) {
         // 如果前方是单纯汉字（如“特号”），视为强力金额锚点
         matches.push({ index: m.index, length: m[0].length, keyword: '号' });
         continue;
@@ -468,8 +474,8 @@ function splitByAnchors(text: string): string[] {
   // 处理可能存在的隐式末尾指令 (如 "35 100")
   const remaining = text.substring(lastIndex).trim();
   if (remaining) {
-    if (/\d+|[一二三四五六七八九十百]+/.test(remaining)) {
-      const implicitMatch = remaining.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
+    if (/\d+|[一二三四五六七八九十百千万]+/.test(remaining)) {
+      const implicitMatch = remaining.match(/^(.*?)(\d+|[一二三四五六七八九十百千万]+)\s*(?:元|米|斤|块|位|个|一个)?\D*$/);
       if (implicitMatch) {
         // 隐式匹配也需要校验：如果是弱分割（空格），数字 >= 50 or 有非数字前缀
         const valStr = implicitMatch[2];
@@ -514,8 +520,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 规则：强度优先 (Strong > Weak)，位置优先 (Right-most)，长度优先 (Longer wins)
   const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
   const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\\s元米斤块位个一个]*`, 'g');
-  const yuanRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\s*元/g;
+  const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个]*`, 'g');
+  const yuanRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/g;
 
   const matches: { keyword: string, amount: string, index: number, length: number, isStrong: boolean }[] = [];
   let m;
@@ -575,7 +581,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     amountStr = bestMatch.amount;
   } else {
     // 兜底逻辑：找末尾数字 (隐式指令)
-    const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百]+)\s*(元|米|斤|块|位|个|一个)?\D*$/);
+    const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百千万]+)\s*(元|米|斤|块|位|个|一个)?\D*$/);
     if (tailMatch) {
       const candidateAmount = tailMatch[2];
       const hasSuffix = !!tailMatch[3];
@@ -610,7 +616,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
     // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色]`, 'g');
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色]`, 'g');
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;
@@ -625,24 +631,45 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     normalized = normalized.replace(/肖/g, ' ');   // 移除单独的“肖”字
     normalized = normalized.replace(/合数/g, '合'); // 统一将“合数”转换为“合”
 
-    // 将中文数字转换为阿拉伯数字进行显示
-    normalized = normalized.replace(/零/g, '0')
-                           .replace(/一/g, '1')
-                           .replace(/二/g, '2')
-                           .replace(/三/g, '3')
-                           .replace(/四/g, '4')
-                           .replace(/五/g, '5')
-                           .replace(/六/g, '6')
-                           .replace(/七/g, '7')
-                           .replace(/八/g, '8')
-                           .replace(/九/g, '9');
-    
-    // 针对“十”，进行智能转换以支持 11-19, 20-99 等
-    normalized = normalized.replace(/([0-9])十([0-9])/g, '$1$2')
-                           .replace(/十([0-9])/g, '1$1')
-                           .replace(/([0-9])十/g, '$10')
-                           .replace(/十/g, '10');
-    normalized = normalized.replace(/百/g, '100');
+    // 智能转换中文数字，避免 "五十" -> "510" 这种错误
+    const replaceChinese = (text: string) => {
+      let res = text;
+      // 处理 百、千、万
+      res = res.replace(/(\d|[一二三四五六七八九])\s*万/g, (_, d) => {
+        const val = /^\d$/.test(d) ? parseInt(d) : { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 }[d as string] || 1;
+        return (val * 10000).toString();
+      });
+      res = res.replace(/(\d|[一二三四五六七八九])\s*千/g, (_, d) => {
+        const val = /^\d$/.test(d) ? parseInt(d) : { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 }[d as string] || 1;
+        return (val * 1000).toString();
+      });
+      res = res.replace(/(\d|[一二三四五六七八九])\s*百/g, (_, d) => {
+        const val = /^\d$/.test(d) ? parseInt(d) : { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 }[d as string] || 1;
+        return (val * 100).toString();
+      });
+      // 处理 十
+      res = res.replace(/([一二三四五六七八九])十([一二三四五六七八九])/g, (_, d1, d2) => {
+        const m: any = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+        return (m[d1] * 10 + m[d2]).toString();
+      });
+      res = res.replace(/十([一二三四五六七八九])/g, (_, d) => {
+        const m: any = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+        return (10 + m[d]).toString();
+      });
+      res = res.replace(/([一二三四五六七八九])十/g, (_, d) => {
+        const m: any = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+        return (m[d] * 10).toString();
+      });
+      res = res.replace(/十/g, '10');
+      // 最后处理个位数
+      const m: any = { '零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+      Object.keys(m).forEach(k => {
+        res = res.replace(new RegExp(k, 'g'), m[k]);
+      });
+      return res;
+    };
+
+    normalized = replaceChinese(normalized);
 
     // 1. 规整化：颜色简写 -> 标准波色
     normalized = normalized.replace(/[兰篮]/g, '蓝');
