@@ -83,11 +83,11 @@ export const STRONG_KEYWORDS = [
   '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
 ];
 // 弱关键字：仅在数字 >= 50 或有币种后缀时才视为金额锚点
-export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X'];
+export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X', '#'];
 export const ALL_KEYWORDS = [...STRONG_KEYWORDS, ...WEAK_KEYWORDS];
 
 // 数据连接符：用于连接多个号码或生肖，不应触发金额切分
-export const DATA_CONNECTORS = ['*', '/', '-', '@', '.', ',', '，', '。', ' ', '\t'];
+export const DATA_CONNECTORS = ['*', '/', '-', '@', '.', ',', '，', '。', ' ', '\t', '数', '#', '[', ']', '(', ')', '【', '】'];
 
 /**
  * 将中文数字转换为阿拉伯数字 (支持到百位，满足金额需求)
@@ -210,16 +210,13 @@ export function parseInput(input: string): ParseResult[] {
       pattern: new RegExp(key, 'g'),
       replacement: val
     })),
-    // 移除 [ ] 括起来的中括号内容，通常是杂质
-    { pattern: /[\[\]]/g, replacement: ' ' },
-    // 在生肖和数字之间由于粘贴等原因没有空格时，自动补上空格
-    { pattern: /([马蛇龙兔虎牛鼠猪狗鸡猴羊])(?=\d)/g, replacement: '$1 ' },
-    { pattern: /(\d)(?=[马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, replacement: '$1 ' },
     // 修复 "01到12" 被冒号断开的问题：将 "门：01到12" 类型的标签冒号暂时移位或移除
     { pattern: /门[：:](?=\d)/g, replacement: '门 ' },
+    // 屏蔽“波”、“数”字，规范识别（如蓝波双 -> 蓝双, 蓝小数 -> 蓝小）
+    { pattern: /[波数]/g, replacement: '' },
   ];
 
-  let preProcessed = input;
+  let preProcessed = input.replace(/元/g, '元\n'); // 核心优化：元字后方添加换行，强制重置识别生命周期
   RECOGNITION_LIBRARY.forEach(rec => {
     preProcessed = preProcessed.replace(rec.pattern, rec.replacement as any);
   });
@@ -251,7 +248,6 @@ export function parseInput(input: string): ParseResult[] {
   
   let buffer = '';
   for (const chunk of rawChunks) {
-    // 内部 cleanDisplayRaw 会处理标准化和特殊模式扩展
     const segments = splitByAnchors(chunk);
     
     if (segments.length > 0) {
@@ -294,36 +290,43 @@ function checkHasAnchor(text: string): boolean {
 
   const weakPattern = WEAK_KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))`, 'g');
-  if (weakRegex.test(text) && (/\d+/.test(text) && parseInt(text.match(/\d+/)?.[0] || '0', 10) >= 50 || /[元米斤块位个一个]/.test(text))) return true;
-
-  // 隐式金额点
-  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@])(\d{2,})/g;
-  let m;
-  while ((m = implicitRegex.exec(text)) !== null) {
-    const val = parseInt(m[1], 10);
-    const beforeText = text.substring(0, m.index);
-    const afterText = text.substring(m.index + m[0].length);
-    
-    // 如果 >= 50，则是强力金额锚点
-    if (val >= 50) return true;
-
-    // 如果 < 50, 需要更严格判定：
-    // 必须要跟禁词区分 (禁词包括分隔符，表示它后面还有数据，所以当前数字大概率不是金额)
-    const followedByForbid = /^\s*[.\d,，各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰]/.test(afterText);
-    const followedByTarget = /^\s*[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
-    const hasTargetBefore = /[^\d\s,，、；;。/*\-@.]/.test(beforeText);
-
-    if (!followedByForbid) {
-      // 只有在末尾（或后面跟目标词）且前面有非数字内容的情况下才判定
-      if ((afterText.trim() === '' || followedByTarget) && hasTargetBefore) return true;
-    }
-  }
   
+  // 对于“号”字做特殊判定：
+  let m;
+  while ((m = weakRegex.exec(text)) !== null) {
+    const keyword = m[1];
+    const amountStr = m[2] || m[3];
+    const val = amountStr ? ( /^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr) ) : 0;
+    const matchIndex = m.index;
+    if (keyword === '号') {
+      const beforeChar = text.substring(0, matchIndex).trim().slice(-1);
+      // 如果前方是数字，则不视为金额锚点 (作为数据分隔符)
+      if (/[\d一二三四五六七八九十百]/.test(beforeChar)) {
+        continue;
+      }
+      // 如果前方是其他汉字，作为金额分隔符 (视为金额锚点，或者作为特殊标记)
+      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百]/.test(beforeChar)) {
+        return true; 
+      }
+    }
+    // “元”字作为强力金额终止符，直接返回 true
+    if (text.includes('元')) return true;
+    if (val >= 50) return true;
+  }
+
+  // 特殊识别：数字 + 元
+  if (/(?:\d+|[一二三四五六七八九十百]+)\s*元/.test(text)) return true;
+
+  // 默认换行符前一个数字为金额
+
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\s,，、。#\-/*@.]*$/gi;
+  if (endOfLineAmountRegex.test(text)) return true;
+
   return false;
 }
 
 /**
- * 寻找字符串中的所有金额锚点位置
+ * 寻找字符串中的所有金额锚点
  */
 function findAllAnchors(text: string): { index: number, length: number, keyword: string }[] {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
@@ -334,7 +337,9 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百]+)(?![\\d一二三四五六七八九十百])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'gi');
 
-  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@])(\d{2,})/g;
+  const yuanSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\s*元/gi;
+  const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.[\]()【】])(\d{2,})/g;
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\s,，、。#\-/*@.]*$/gi;
 
   const matches: { index: number, length: number, keyword: string }[] = [];
   let m;
@@ -343,12 +348,32 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
     matches.push({ index: m.index, length: m[0].length, keyword: m[1] });
   }
   while ((m = weakRegex.exec(text)) !== null) {
-    const amountStr = m[2] || m[3] || m[6] || m[8];
-    const val = parseInt(amountStr, 10);
-    const hasSuffix = !!m[4];
-    if (val >= 50 || hasSuffix) {
-      matches.push({ index: m.index, length: m[0].length, keyword: m[1] || m[5] || m[7] });
+    const keyword = m[1] || m[4] || m[6];
+    const amountStr = m[2] || m[3] || m[5] || m[7];
+    const val = amountStr ? ( /^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr) ) : 0;
+    const hasSuffix = !!m[1]; // Branch 1 matches
+    
+    // “号”字特判：
+    if (keyword === '号') {
+      const beforeChar = text.substring(0, m.index).trim().slice(-1);
+      if (/[\d一二三四五六七八九十百]/.test(beforeChar)) {
+        // 作为数据分隔符，跳过金额锚点识别
+        continue;
+      }
+      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百]/.test(beforeChar)) {
+        // 如果前方是单纯汉字（如“特号”），视为强力金额锚点
+        matches.push({ index: m.index, length: m[0].length, keyword: '号' });
+        continue;
+      }
     }
+
+    if (val >= 50 || hasSuffix || text.substring(m.index).includes('元')) {
+      matches.push({ index: m.index, length: m[0].length, keyword: keyword || 'weak' });
+    }
+  }
+  while ((m = yuanSuffixRegex.exec(text)) !== null) {
+    // “元”作为强力终止符，必须包含
+    matches.push({ index: m.index, length: m[0].length, keyword: '元' });
   }
   while ((m = implicitRegex.exec(text)) !== null) {
     const val = parseInt(m[1], 10);
@@ -356,10 +381,18 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
     const afterText = text.substring(m.index + m[0].length);
     const followedByForbid = /^\s*[.\d,，各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰]/.test(afterText);
     const followedByTarget = /^\s*[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
-    const hasTargetBefore = /[^\d\s,，、；;。/*\-@.]/.test(beforeText);
+    const hasTargetBefore = /[^\d\s,，、；;。/*\-@.[\]()【】]/.test(beforeText);
+    const hasNumberRightBefore = /[\d][\s,，、；;。/*\-@.[\]()【】]*$/.test(beforeText);
 
-    if (val >= 50 || (!followedByForbid && (afterText.trim() === '' || followedByTarget) && hasTargetBefore)) {
+    if (val >= 50 || (!followedByForbid && (afterText.trim() === '' || followedByTarget) && hasTargetBefore && !hasNumberRightBefore)) {
       matches.push({ index: m.index, length: m[0].length, keyword: 'implicit' });
+    }
+  }
+
+  // 如果仍无锚点，识别行尾金额
+  if (matches.length === 0) {
+    while ((m = endOfLineAmountRegex.exec(text)) !== null) {
+      matches.push({ index: m.index, length: m[0].length, keyword: 'EOL' });
     }
   }
 
@@ -458,17 +491,41 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
   const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\\s元米斤块位个一个]*`, 'g');
+  const yuanRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))\s*元/g;
 
   const matches: { keyword: string, amount: string, index: number, length: number, isStrong: boolean }[] = [];
   let m;
   while ((m = anchorRegex.exec(segment)) !== null) {
+    const keyword = m[1];
+    const amountStr = m[2] || m[3];
+    const val = amountStr ? ( /^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr) ) : 0;
+    const isStrong = STRONG_KEYWORDS.includes(keyword);
+    
+    // 弱锚点校验：如果金额 < 50 且没有强币种后缀，则不将其视为金额锚点
+    if (!isStrong) {
+      if (val < 50 && !segment.includes('元')) continue;
+    }
+
     matches.push({
-      keyword: m[1],
-      amount: m[2] || m[3],
+      keyword,
+      amount: amountStr,
       index: m.index,
       length: m[0].length,
-      isStrong: STRONG_KEYWORDS.includes(m[1])
+      isStrong
     });
+  }
+
+  while ((m = yuanRegex.exec(segment)) !== null) {
+    // 如果还没被识别，则作为元金额点
+    if (!matches.some(ex => ex.index === m.index)) {
+      matches.push({
+        keyword: '元',
+        amount: m[1] || m[2],
+        index: m.index,
+        length: m[0].length,
+        isStrong: true
+      });
+    }
   }
 
   let bestMatch = null;
@@ -567,9 +624,6 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     normalized = normalized.replace(/[兰篮]/g, '蓝');
     normalized = normalized.replace(/(红|蓝|绿)(?!波|单|双|大|小|合)/g, '$1波');
     
-    // 移除行首的分隔符
-    normalized = normalized.replace(/^[、，,。\s]+/gm, '');
-    
     // 2. 规整化：分类词 -> 标准名
     normalized = normalized.replace(/家禽|家肖|家兽|家/g, '家禽');
     normalized = normalized.replace(/野肖|野兽|野/g, '野肖');
@@ -585,12 +639,11 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     // 特殊处理：将 "0 1 2头", "345尾", "尾345" 等转换成 "0头 1头 2头" 格式显示
     // 逻辑：寻找数字加上分隔符的组合，后面接头尾；或头尾后面接数字组合
-    // 优化正则，允许数字与头尾之间存在更多种类的分隔符和杂质
-    const headTailRegex = /(\d+(?:[^\d\u4e00-\u9fa5]*\d+)*)[^\d\u4e00-\u9fa5]*([头尾])|([头尾])[^\d\u4e00-\u9fa5]*(\d+(?:[^\d\u4e00-\u9fa5]*\d+)*)/g;
+    // 优化正则，允许数字与头尾之间存在分隔符（如 "3、2、5、尾"）
+    const headTailRegex = /(\d+(?:[\s.，、\-\/@*。]+\d+)*)[\s.，、\-\/@*。]*([头尾])|([头尾])[\s.，、\-\/@*。]*(\d+(?:[\s.，、\-\/@*。]+\d+)*)/g;
     normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
       const p = pSuffix || pPrefix;
       const suffix = suffixStr || prefixStr;
-      // 提取所有数字。统一逻辑：如果是连写的数字串（如 369尾），将其拆分为单个数字以匹配解析逻辑
       const digits = p.match(/\d/g);
       if (digits) {
         return digits.map(d => ` ${d}${suffix} `).join(' ');
@@ -601,7 +654,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     return normalized
       .replace(whitelist, ' ')                    // 不在白名单内的全部替换为空格
       .replace(/([马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, ' $1 ') // 仅针对生肖字前后增加空格，实现生肖间的分离
-      .replace(/(\d+)(?!\d|[尾头])/g, ' $1 ')      // 确保整个数字后面不接数字且不接尾/头时才加空格
+      .replace(/(\d+)(?![尾头])/g, ' $1 ')         // 确保普通数字前后有空格，排除尾/头
       .replace(/(\d+[尾头])/g, ' $1 ')             // 确保“X尾/X头”作为一个整体前后有空格
       .replace(/\s+/g, ' ')                       // 合并多个空格
       .trim()
@@ -624,6 +677,14 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
             return smartSplitDigits(part).map(n => n.toString().padStart(2, '0'));
           }
         }
+        // 屏蔽掉单独的“数”这个字
+        if (part === '数') {
+          return [];
+        }
+        // 特殊处理：如果 part 中包含非数字且包含“数”字，但不是已知的组合词，则屏蔽掉其中的“数”
+        // 注意：因为 whitelist 允许了“数”，所以如果它没在 combinations 中被替换，会留在这里
+        // 如果是单独的“数”已经在上面处理了，这里处理类似“马数”这种情况
+        // 但由于马后面加了空格，所以“马数”其实已经变成了 ["马", "数"]，会被上面的 if 捕获
         return [part];
       })
       .join(' ')                                  // 使用空格连接，主要是在数字和关键词间留出空格
@@ -822,12 +883,77 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     // 3. 大小单双 & 特殊组合逻辑 (移至生肖之前，防止“反数”中的“数”被识别为生肖)
     const combinations = [
-      { key: '绿波单', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n % 2 !== 0 },
-      { key: '绿波双', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n % 2 === 0 },
-      { key: '蓝波单', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n % 2 !== 0 },
-      { key: '蓝波双', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n % 2 === 0 },
-      { key: '红波单', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n % 2 !== 0 },
-      { key: '红波双', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n % 2 === 0 },
+      // 3项/4项组合 (合数 + 大小 + 单双 + 合单双)
+      { key: '合大单单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 !== 0 && n % 2 !== 0; } },
+      { key: '合大单双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 !== 0 && n % 2 === 0; } },
+      { key: '合大双单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 === 0 && n % 2 !== 0; } },
+      { key: '合大双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 === 0 && n % 2 === 0; } },
+      { key: '合小单单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 !== 0 && n % 2 !== 0; } },
+      { key: '合小单双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 !== 0 && n % 2 === 0; } },
+      { key: '合小双单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 === 0 && n % 2 !== 0; } },
+      { key: '合小双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 === 0 && n % 2 === 0; } },
+      { key: '合大单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && n % 2 !== 0; } },
+      { key: '合大双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && n % 2 === 0; } },
+      { key: '合小单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && n % 2 !== 0; } },
+      { key: '合小双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && n % 2 === 0; } },
+
+      // 波色 + 大小 + 单双 组合
+      { key: '红大单', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n >= 25 && n % 2 !== 0 },
+      { key: '红大双', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n >= 25 && n % 2 === 0 },
+      { key: '红小单', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n <= 24 && n % 2 !== 0 },
+      { key: '红小双', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n <= 24 && n % 2 === 0 },
+      { key: '蓝大单', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n >= 25 && n % 2 !== 0 },
+      { key: '蓝大双', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n >= 25 && n % 2 === 0 },
+      { key: '蓝小单', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n <= 24 && n % 2 !== 0 },
+      { key: '蓝小双', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n <= 24 && n % 2 === 0 },
+      { key: '绿大单', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n >= 25 && n % 2 !== 0 },
+      { key: '绿大双', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n >= 25 && n % 2 === 0 },
+      { key: '绿小单', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n <= 24 && n % 2 !== 0 },
+      { key: '绿小双', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n <= 24 && n % 2 === 0 },
+
+      // 其他常见两两组合
+      { key: '红单', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n % 2 !== 0 },
+      { key: '红双', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n % 2 === 0 },
+      { key: '蓝单', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n % 2 !== 0 },
+      { key: '蓝双', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n % 2 === 0 },
+      { key: '绿单', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n % 2 !== 0 },
+      { key: '绿双', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n % 2 === 0 },
+      { key: '红大', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n >= 25 },
+      { key: '红小', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n <= 24 },
+      { key: '蓝大', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n >= 25 },
+      { key: '蓝小', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n <= 24 },
+      { key: '绿大', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n >= 25 },
+      { key: '绿小', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n <= 24 },
+      { key: '大单', filter: (n: number) => n >= 25 && n % 2 !== 0 },
+      { key: '大双', filter: (n: number) => n >= 25 && n % 2 === 0 },
+      { key: '小单', filter: (n: number) => n <= 24 && n % 2 !== 0 },
+      { key: '小双', filter: (n: number) => n <= 24 && n % 2 === 0 },
+      { key: '合单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0; } },
+      { key: '合双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0; } },
+      { key: '合大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7; } },
+      { key: '合小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6; } },
+
+      // 增加常见三项简写组合 (支持乱序)
+      { key: '大单红', filter: (n: number) => n >= 25 && n % 2 !== 0 && (COLOR_MAP['红'] as unknown as number[]).includes(n) },
+      { key: '大双红', filter: (n: number) => n >= 25 && n % 2 === 0 && (COLOR_MAP['红'] as unknown as number[]).includes(n) },
+      { key: '小单红', filter: (n: number) => n <= 24 && n % 2 !== 0 && (COLOR_MAP['红'] as unknown as number[]).includes(n) },
+      { key: '小双红', filter: (n: number) => n <= 24 && n % 2 === 0 && (COLOR_MAP['红'] as unknown as number[]).includes(n) },
+      { key: '大单蓝', filter: (n: number) => n >= 25 && n % 2 !== 0 && (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '大双蓝', filter: (n: number) => n >= 25 && n % 2 === 0 && (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '小单蓝', filter: (n: number) => n <= 24 && n % 2 !== 0 && (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '小双蓝', filter: (n: number) => n <= 24 && n % 2 === 0 && (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
+      { key: '大单绿', filter: (n: number) => n >= 25 && n % 2 !== 0 && (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
+      { key: '大双绿', filter: (n: number) => n >= 25 && n % 2 === 0 && (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
+      { key: '小单绿', filter: (n: number) => n <= 24 && n % 2 !== 0 && (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
+      { key: '小双绿', filter: (n: number) => n <= 24 && n % 2 === 0 && (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
+
+      // 原有 2项/3项组合
+      { key: '绿单', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n % 2 !== 0 },
+      { key: '绿双', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n % 2 === 0 },
+      { key: '蓝单', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n % 2 !== 0 },
+      { key: '蓝双', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n % 2 === 0 },
+      { key: '红单', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n % 2 !== 0 },
+      { key: '红双', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n % 2 === 0 },
       { key: '合单小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n <= 24; } },
       { key: '合双小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n <= 24; } },
       { key: '合单大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n >= 25; } },
@@ -836,15 +962,12 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       { key: '合单双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n % 2 === 0; } },
       { key: '合双单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n % 2 !== 0; } },
       { key: '合双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n % 2 === 0; } },
-      { key: '蓝波小', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n <= 24 },
-      { key: '蓝波大', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n >= 25 },
-      { key: '红波小', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n <= 24 },
-      { key: '红波大', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n >= 25 },
-      { key: '绿波小', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n <= 24 },
-      { key: '绿波大', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n >= 25 },
-      { key: '蓝波数', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
-      { key: '红波数', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) },
-      { key: '绿波数', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
+      { key: '蓝小', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n <= 24 },
+      { key: '蓝大', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n >= 25 },
+      { key: '红小', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n <= 24 },
+      { key: '红大', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) && n >= 25 },
+      { key: '绿小', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n <= 24 },
+      { key: '绿大', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n >= 25 },
       { key: '大单', filter: (n: number) => n >= 25 && n % 2 !== 0 },
       { key: '大双', filter: (n: number) => n >= 25 && n % 2 === 0 },
       { key: '小单', filter: (n: number) => n <= 24 && n % 2 !== 0 },
@@ -861,18 +984,10 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       { key: '蓝小', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) && n <= 24 },
       { key: '绿大', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n >= 25 },
       { key: '绿小', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) && n <= 24 },
-      { key: '大数', filter: (n: number) => n >= 25 },
-      { key: '小数', filter: (n: number) => n <= 24 },
-      { key: '倒反数', filter: (n: number) => [12, 21, 13, 31, 24, 42, 14, 41, 32, 23, 43, 34].includes(n) },
       { key: '大', filter: (n: number) => n >= 25 },
       { key: '小', filter: (n: number) => n <= 24 },
       { key: '单', filter: (n: number) => n % 2 !== 0 },
       { key: '双', filter: (n: number) => n % 2 === 0 },
-      { key: '红波', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) },
-      { key: '蓝波', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
-      { key: '兰波', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
-      { key: '篮波', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
-      { key: '绿波', filter: (n: number) => (COLOR_MAP['绿'] as unknown as number[]).includes(n) },
       { key: '红', filter: (n: number) => (COLOR_MAP['红'] as unknown as number[]).includes(n) },
       { key: '蓝', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
       { key: '兰', filter: (n: number) => (COLOR_MAP['蓝'] as unknown as number[]).includes(n) },
@@ -883,18 +998,13 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       { key: '水', filter: (n: number) => (ELEMENTS_MAP['水'] as unknown as number[]).includes(n) },
       { key: '火', filter: (n: number) => (ELEMENTS_MAP['火'] as unknown as number[]).includes(n) },
       { key: '土', filter: (n: number) => (ELEMENTS_MAP['土'] as unknown as number[]).includes(n) },
-      { key: '波色', filter: (n: number) => false }, // 占位符，防止“色”被拆分
+      { key: '色', filter: (n: number) => false }, // 占位符，防止“色”被拆分
       { key: '合单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0; } },
       { key: '合双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0; } },
       { key: '合大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7; } },
       { key: '合小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6; } },
-      { key: '合数单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0; } },
-      { key: '合数双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0; } },
-      { key: '合数大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7; } },
-      { key: '合数小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6; } },
-      { key: '反数', filter: (n: number) => [12, 21, 13, 31, 24, 42, 14, 41, 32, 23, 43, 34].includes(n) },
-      { key: '反字', filter: (n: number) => [12, 21, 13, 31, 24, 42, 14, 41, 32, 23, 43, 34].includes(n) },
       { key: '反', filter: (n: number) => [12, 21, 13, 31, 24, 42, 14, 41, 32, 23, 43, 34].includes(n) },
+      { key: '倒反', filter: (n: number) => [12, 21, 13, 31, 24, 42, 14, 41, 32, 23, 43, 34].includes(n) },
     ];
 
     // 按长度排序防止子串命中 (如 "倒反数" 命中 "反数")
@@ -911,6 +1021,42 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       }
       remainingStr = remainingStr.replace(regex, ' ');
     });
+
+    // 交叉组合识别逻辑 (针对无分隔符的组合，如 "红小双")
+    // 如果原始目标字符串中包含多个组合模式，且没有明显分隔符，尝试计算交集
+    const hasSeparators = /[\s,，、。#\/*@.]/.test(targetsStr);
+    if (!hasSeparators) {
+      const matchedFilterKeys: string[] = [];
+      const intersectionFilters: ((n: number) => boolean)[] = [];
+      
+      // 检查 targetsStr 中出现了哪些组合 key
+      combinations.forEach(combo => {
+        if (targetsStr.includes(combo.key)) {
+          matchedFilterKeys.push(combo.key);
+          intersectionFilters.push(combo.filter);
+        }
+      });
+
+      // 如果命中了 2 个及以上的过滤器，且它们能产生交集，则替换当前 pooled 号码
+      if (intersectionFilters.length >= 2) {
+        const intersectionNums = [];
+        for (let n = 1; n <= 49; n++) {
+          if (intersectionFilters.every(f => f(n))) {
+            intersectionNums.push(n);
+          }
+        }
+        if (intersectionNums.length > 0) {
+          // 清空并重新填充（这里需要小心，因为可能还有其他独立号码）
+          // 但根据用户描述，这种组合通常是独立出现的
+          return [{
+            numbers: intersectionNums,
+            amount: amount,
+            raw: displayRaw,
+            type: comboType
+          }];
+        }
+      }
+    }
 
     // 4. 提取生肖 (含谐音)
     // 收集所有谐音及其映射关系，按字符长度倒序排列，防止短字误伤长字
@@ -957,10 +1103,12 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
         numbers: allNumbers,
         amount,
         raw: displayRaw,
-        type: 'single'
+        type: comboType
       });
     }
+
+    return results.length > 0 ? results : null;
   }
 
-  return results.length > 0 ? results : null;
+  return null;
 }
