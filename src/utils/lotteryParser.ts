@@ -318,9 +318,25 @@ function checkHasAnchor(text: string): boolean {
   if (/(?:\d+|[一二三四五六七八九十百]+)\s*元/.test(text)) return true;
 
   // 默认换行符前一个数字为金额
-
   const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百]+)(?![一二三四五六七八九十百]))[\s,，、。#\-/*@.]*$/gi;
-  if (endOfLineAmountRegex.test(text)) return true;
+  const eolMatch = endOfLineAmountRegex.exec(text);
+  if (eolMatch) {
+    const amountStr = eolMatch[1] || eolMatch[2];
+    const val = amountStr ? (/^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr)) : 0;
+    
+    const rawBeforeText = text.substring(0, eolMatch.index);
+    const connectors = rawBeforeText.match(/[\s,，、。#\-/*@.]/g);
+    
+    // 如果连接符高频出现且数字在 1-49 范围内，认为这是数据而非金额
+    if (connectors) {
+      const lastChar = connectors[connectors.length - 1];
+      const charCount = (rawBeforeText.split(lastChar).length - 1);
+      if (charCount >= 2 && val <= 49) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   return false;
 }
@@ -392,6 +408,23 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
   // 如果仍无锚点，识别行尾金额
   if (matches.length === 0) {
     while ((m = endOfLineAmountRegex.exec(text)) !== null) {
+      const amountStr = m[1] || m[2];
+      const val = amountStr ? (/^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr)) : 0;
+      
+      const beforeIndex = m.index;
+      const rawBeforeText = text.substring(0, beforeIndex);
+      const connectors = rawBeforeText.match(/[\s,，、。#\-/*@.]/g);
+      
+      // 分隔符密度检测：如果连接符在行内高频出现 (>=2次)，且当前数字属于 1-49 范围，则很大可能是数据列表而非金额
+      // 这能有效解决 02.38.40.46...21 被误识别为金额的问题
+      if (connectors) {
+        const lastChar = connectors[connectors.length - 1];
+        const charCount = (rawBeforeText.split(lastChar).length - 1);
+        if (charCount >= 2 && val <= 49) {
+          continue; 
+        }
+      }
+      
       matches.push({ index: m.index, length: m[0].length, keyword: 'EOL' });
     }
   }
