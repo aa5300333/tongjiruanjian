@@ -677,9 +677,36 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
       const p = pSuffix || pPrefix;
       const suffix = suffixStr || prefixStr;
-      const digits = p.match(/\d/g);
-      if (digits) {
-        return digits.map(d => ` ${d}${suffix} `).join(' ');
+      const parts = p.split(/([\s.，、\-\/@*。]+)/);
+      
+      if (pSuffix) {
+        let confirmedStartIndex = parts.length;
+        for (let i = parts.length - 1; i >= 0; i--) {
+          const part = parts[i];
+          if (/[\s.，、\-\/@*。]+/.test(part)) continue;
+          if (part.length > 1 && i < parts.length - 1) break;
+          confirmedStartIndex = i;
+        }
+        if (confirmedStartIndex < parts.length) {
+          const beforeTailsStr = parts.slice(0, confirmedStartIndex).join('');
+          const tailDigitsStr = parts.slice(confirmedStartIndex).join('');
+          const expanded = (tailDigitsStr.match(/\d/g) || []).map(d => ` ${d}${suffix} `).join(' ');
+          return beforeTailsStr + expanded;
+        }
+      } else {
+        let confirmedEndIndex = -1;
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
+          if (/[\s.，、\-\/@*。]+/.test(part)) continue;
+          if (part.length > 1 && i > 0) break;
+          confirmedEndIndex = i;
+        }
+        if (confirmedEndIndex >= 0) {
+          const tailDigitsStr = parts.slice(0, confirmedEndIndex + 1).join('');
+          const afterTailsStr = parts.slice(confirmedEndIndex + 1).join('');
+          const expanded = (tailDigitsStr.match(/\d/g) || []).map(d => ` ${d}${suffix} `).join(' ');
+          return expanded + afterTailsStr;
+        }
       }
       return match;
     });
@@ -831,71 +858,121 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       }
     });
 
-    // 1. 处理 "X尾" 或 "尾X" (逻辑优化：使用更贪婪的正则表达式捕获前缀)
+    // 1. 处理 "X尾" 或 "尾X"
     const tailRegex = /([\d\s.，、\-\/@*。零一二三四五六七八九]+)尾/g;
     const tailPrefixRegex = /尾([\d\s.，、\-\/@*。零一二三四五六七八九]+)/g;
     
-    let tMatch;
-    while ((tMatch = tailRegex.exec(remainingStr)) !== null) {
-      const digits = tMatch[1].match(/\d|[零一二三四五六七八九]/g);
-      if (digits) {
-        digits.forEach(d => {
-          const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-          for (let i = 1; i <= 49; i++) {
-            if (i % 10 === tail) allNumbers.push(i);
-          }
-        });
+    remainingStr = remainingStr.replace(tailRegex, (match, prefix) => {
+      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
+      let confirmedStartIndex = parts.length;
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i];
+        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
+        if (part.length > 1 && i < parts.length - 1) break;
+        confirmedStartIndex = i;
       }
-    }
-    remainingStr = remainingStr.replace(tailRegex, ' ');
-    
-    while ((tMatch = tailPrefixRegex.exec(remainingStr)) !== null) {
-      const digits = tMatch[1].match(/\d|[零一二三四五六七八九]/g);
-      if (digits) {
-        digits.forEach(d => {
-          const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-          for (let i = 1; i <= 49; i++) {
-            if (i % 10 === tail) allNumbers.push(i);
-          }
-        });
+      if (confirmedStartIndex < parts.length) {
+        const beforeTailsStr = parts.slice(0, confirmedStartIndex).join('');
+        const tailDigitsStr = parts.slice(confirmedStartIndex).join('');
+        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
+        if (digits) {
+          digits.forEach(d => {
+            const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+            for (let i = 1; i <= 49; i++) {
+              if (i % 10 === tail) allNumbers.push(i);
+            }
+          });
+        }
+        return beforeTailsStr + ' ';
       }
-    }
-    remainingStr = remainingStr.replace(tailPrefixRegex, ' ');
+      return match;
+    });
+
+    remainingStr = remainingStr.replace(tailPrefixRegex, (match, prefix) => {
+      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
+      let confirmedEndIndex = -1;
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
+        if (part.length > 1 && i > 0) break;
+        confirmedEndIndex = i;
+      }
+      if (confirmedEndIndex >= 0) {
+        const tailDigitsStr = parts.slice(0, confirmedEndIndex + 1).join('');
+        const afterTailsStr = parts.slice(confirmedEndIndex + 1).join('');
+        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
+        if (digits) {
+          digits.forEach(d => {
+            const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+            for (let i = 1; i <= 49; i++) {
+              if (i % 10 === tail) allNumbers.push(i);
+            }
+          });
+        }
+        return ' ' + afterTailsStr;
+      }
+      return match;
+    });
 
     // 1.1 处理 "X头" 或 "头X"
     const headRegex = /([\d\s.，、\-\/@*。零一二三四五六七八九]+)头/g;
     const headPrefixRegex = /头([\d\s.，、\-\/@*。零一二三四五六七八九]+)/g;
     
-    let hMatch;
-    while ((hMatch = headRegex.exec(remainingStr)) !== null) {
-      const digits = hMatch[1].match(/\d|[零一二三四五六七八九]/g);
-      if (digits) {
-        digits.forEach(d => {
-          const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-          if (head >= 0 && head <= 4) {
-            for (let i = 1; i <= 49; i++) {
-              if (Math.floor(i / 10) === head) allNumbers.push(i);
-            }
-          }
-        });
+    remainingStr = remainingStr.replace(headRegex, (match, prefix) => {
+      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
+      let confirmedStartIndex = parts.length;
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const part = parts[i];
+        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
+        if (part.length > 1 && i < parts.length - 1) break;
+        confirmedStartIndex = i;
       }
-    }
-    remainingStr = remainingStr.replace(headRegex, ' ');
+      if (confirmedStartIndex < parts.length) {
+        const beforeTailsStr = parts.slice(0, confirmedStartIndex).join('');
+        const tailDigitsStr = parts.slice(confirmedStartIndex).join('');
+        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
+        if (digits) {
+          digits.forEach(d => {
+            const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+            if (head >= 0 && head <= 4) {
+              for (let i = 1; i <= 49; i++) {
+                if (Math.floor(i / 10) === head) allNumbers.push(i);
+              }
+            }
+          });
+        }
+        return beforeTailsStr + ' ';
+      }
+      return match;
+    });
 
-    while ((hMatch = headPrefixRegex.exec(remainingStr)) !== null) {
-      const digits = hMatch[1].match(/\d|[零一二三四五六七八九]/g);
-      if (digits) {
-        digits.forEach(d => {
-          const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-          if (head >= 0 && head <= 4) {
-            for (let i = 1; i <= 49; i++) {
-              if (Math.floor(i / 10) === head) allNumbers.push(i);
-            }
-          }
-        });
+    remainingStr = remainingStr.replace(headPrefixRegex, (match, prefix) => {
+      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
+      let confirmedEndIndex = -1;
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
+        if (part.length > 1 && i > 0) break;
+        confirmedEndIndex = i;
       }
-    }
-    remainingStr = remainingStr.replace(headPrefixRegex, ' ');
+      if (confirmedEndIndex >= 0) {
+        const tailDigitsStr = parts.slice(0, confirmedEndIndex + 1).join('');
+        const afterTailsStr = parts.slice(confirmedEndIndex + 1).join('');
+        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
+        if (digits) {
+          digits.forEach(d => {
+            const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+            if (head >= 0 && head <= 4) {
+              for (let i = 1; i <= 49; i++) {
+                if (Math.floor(i / 10) === head) allNumbers.push(i);
+              }
+            }
+          });
+        }
+        return ' ' + afterTailsStr;
+      }
+      return match;
+    });
 
     // 2. 处理 "X到Y"
     const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*到\s*(\d+|[一二三四五六七八九十百]+)/g;
