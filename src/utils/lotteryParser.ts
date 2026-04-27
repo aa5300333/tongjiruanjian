@@ -125,10 +125,22 @@ function smartSplitDigits(nStr: string): number[] {
   // 如果是 3 位或更多，且可能被解析为金额（但在错误位置），我们应谨慎
   // 这里的逻辑主要针对 010523 这种连续号码
   if (nStr.length >= 3 && parseInt(nStr, 10) > 49) {
-    // 检查是否全由 0-9 组成
     if (!/^\d+$/.test(nStr)) return [];
     
-    // 尝试两位一拆
+    // For 3-digit strings like "369", if all digits are 1-9, prefer 3 separate numbers.
+    // This is common for "369尾" or "369头" cases even if the tail suffix was missed.
+    if (nStr.length === 3) {
+      const d1 = parseInt(nStr[0], 10);
+      const d2 = parseInt(nStr[1], 10);
+      const d3 = parseInt(nStr[2], 10);
+      const res = [];
+      if (d1 >= 1 && d1 <= 49) res.push(d1);
+      if (d2 >= 1 && d2 <= 49) res.push(d2);
+      if (d3 >= 1 && d3 <= 49) res.push(d3);
+      return res;
+    }
+    
+    // Otherwise try two-by-two splitting
     let potential: number[] = [];
     let possible = true;
     for (let i = 0; i < nStr.length; i += 2) {
@@ -137,8 +149,7 @@ function smartSplitDigits(nStr: string): number[] {
       const val = parseInt(chunk, 10);
       if (val >= 1 && val <= 49) {
         potential.push(val);
-      } else if (chunk.length === 1 && parseInt(chunk, 10) >= 1) {
-        // 允许最后一位是个位数
+      } else if (chunk.length === 1 && parseInt(chunk, 10) >= 0) {
         potential.push(parseInt(chunk, 10));
       } else {
         possible = false;
@@ -146,16 +157,7 @@ function smartSplitDigits(nStr: string): number[] {
       }
     }
     if (possible) return potential;
-    
-    // 如果不能完美按两位拆分，看看是不是类似 123 拆成 1 2 3
-    if (nStr.length === 3) {
-      const d1 = parseInt(nStr[0], 10);
-      const d2 = parseInt(nStr[1], 10);
-      const d3 = parseInt(nStr[2], 10);
-      if (d1 >= 1 && d2 >= 1 && d3 >= 1) return [d1, d2, d3];
-    }
-    
-    return []; // 无法识别为合规号码
+    return [];
   }
 
   let i = 0;
@@ -691,40 +693,14 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     // 特殊处理：将 "0 1 2头", "345尾", "尾345" 等转换成 "0头 1头 2头" 格式显示
     // 逻辑：寻找数字加上分隔符的组合，后面接头尾；或头尾后面接数字组合
     // 优化正则，允许数字与头尾之间存在分隔符（如 "3、2、5、尾"）
-    const headTailRegex = /(\d+(?:[\s.，、\-\/@*。]+\d+)*)[\s.，、\-\/@*。]*([头尾])|([头尾])[\s.，、\-\/@*。]*(\d+(?:[\s.，、\-\/@*。]+\d+)*)/g;
+    const headTailRegex = /([\d\s.，、\-\/@*。]+)([头尾])|([头尾])([\d\s.，、\-\/@*。]+)/g;
     normalized = normalized.replace(headTailRegex, (match, pSuffix, suffixStr, prefixStr, pPrefix) => {
       const p = pSuffix || pPrefix;
       const suffix = suffixStr || prefixStr;
-      const parts = p.split(/([\s.，、\-\/@*。]+)/);
       
-      if (pSuffix) {
-        let confirmedStartIndex = parts.length;
-        for (let i = parts.length - 1; i >= 0; i--) {
-          const part = parts[i];
-          if (/[\s.，、\-\/@*。]+/.test(part)) continue;
-          if (part.length > 1 && i < parts.length - 1) break;
-          confirmedStartIndex = i;
-        }
-        if (confirmedStartIndex < parts.length) {
-          const beforeTailsStr = parts.slice(0, confirmedStartIndex).join('');
-          const tailDigitsStr = parts.slice(confirmedStartIndex).join('');
-          const expanded = (tailDigitsStr.match(/\d/g) || []).map(d => ` ${d}${suffix} `).join(' ');
-          return beforeTailsStr + expanded;
-        }
-      } else {
-        let confirmedEndIndex = -1;
-        for (let i = 0; i < parts.length; i++) {
-          const part = parts[i];
-          if (/[\s.，、\-\/@*。]+/.test(part)) continue;
-          if (part.length > 1 && i > 0) break;
-          confirmedEndIndex = i;
-        }
-        if (confirmedEndIndex >= 0) {
-          const tailDigitsStr = parts.slice(0, confirmedEndIndex + 1).join('');
-          const afterTailsStr = parts.slice(confirmedEndIndex + 1).join('');
-          const expanded = (tailDigitsStr.match(/\d/g) || []).map(d => ` ${d}${suffix} `).join(' ');
-          return expanded + afterTailsStr;
-        }
+      const digits = p.match(/\d/g);
+      if (digits) {
+        return digits.map(d => ` ${d}${suffix} `).join(' ');
       }
       return match;
     });
@@ -878,116 +854,70 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     // 1. 处理 "X尾" 或 "尾X"
     const tailRegex = /([\d\s.，、\-\/@*。零一二三四五六七八九]+)尾/g;
-    const tailPrefixRegex = /尾([\d\s.，、\-\/@*。零一二三四五六七八九]+)/g;
+    const tailPrefixRegex = /尾([\d\s.，、\-\/@*。]+)/g;
     
     remainingStr = remainingStr.replace(tailRegex, (match, prefix) => {
-      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
-      let confirmedStartIndex = parts.length;
-      for (let i = parts.length - 1; i >= 0; i--) {
-        const part = parts[i];
-        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
-        if (part.length > 1 && i < parts.length - 1) break;
-        confirmedStartIndex = i;
-      }
-      if (confirmedStartIndex < parts.length) {
-        const beforeTailsStr = parts.slice(0, confirmedStartIndex).join('');
-        const tailDigitsStr = parts.slice(confirmedStartIndex).join('');
-        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
-        if (digits) {
-          digits.forEach(d => {
-            const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-            for (let i = 1; i <= 49; i++) {
-              if (i % 10 === tail) allNumbers.push(i);
-            }
-          });
-        }
-        return beforeTailsStr + ' ';
+      // Split into individual digits more robustly
+      // Also handle 3-digit strings by splitting them into individual tail digits
+      const digits = prefix.match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          for (let i = 1; i <= 49; i++) {
+            if (i % 10 === tail) allNumbers.push(i);
+          }
+        });
+        return ' ';
       }
       return match;
     });
 
-    remainingStr = remainingStr.replace(tailPrefixRegex, (match, prefix) => {
-      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
-      let confirmedEndIndex = -1;
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
-        if (part.length > 1 && i > 0) break;
-        confirmedEndIndex = i;
-      }
-      if (confirmedEndIndex >= 0) {
-        const tailDigitsStr = parts.slice(0, confirmedEndIndex + 1).join('');
-        const afterTailsStr = parts.slice(confirmedEndIndex + 1).join('');
-        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
-        if (digits) {
-          digits.forEach(d => {
-            const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-            for (let i = 1; i <= 49; i++) {
-              if (i % 10 === tail) allNumbers.push(i);
-            }
-          });
-        }
-        return ' ' + afterTailsStr;
+    remainingStr = remainingStr.replace(tailPrefixRegex, (match, suffix) => {
+      const digits = suffix.match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          for (let i = 1; i <= 49; i++) {
+            if (i % 10 === tail) allNumbers.push(i);
+          }
+        });
+        return ' ';
       }
       return match;
     });
 
     // 1.1 处理 "X头" 或 "头X"
     const headRegex = /([\d\s.，、\-\/@*。零一二三四五六七八九]+)头/g;
-    const headPrefixRegex = /头([\d\s.，、\-\/@*。零一二三四五六七八九]+)/g;
+    const headPrefixRegex = /头([\d\s.，、\-\/@*。]+)/g;
     
     remainingStr = remainingStr.replace(headRegex, (match, prefix) => {
-      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
-      let confirmedStartIndex = parts.length;
-      for (let i = parts.length - 1; i >= 0; i--) {
-        const part = parts[i];
-        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
-        if (part.length > 1 && i < parts.length - 1) break;
-        confirmedStartIndex = i;
-      }
-      if (confirmedStartIndex < parts.length) {
-        const beforeTailsStr = parts.slice(0, confirmedStartIndex).join('');
-        const tailDigitsStr = parts.slice(confirmedStartIndex).join('');
-        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
-        if (digits) {
-          digits.forEach(d => {
-            const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-            if (head >= 0 && head <= 4) {
-              for (let i = 1; i <= 49; i++) {
-                if (Math.floor(i / 10) === head) allNumbers.push(i);
-              }
+      const digits = prefix.match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          if (head >= 0 && head <= 4) {
+            for (let i = 1; i <= 49; i++) {
+              if (Math.floor(i / 10) === head) allNumbers.push(i);
             }
-          });
-        }
-        return beforeTailsStr + ' ';
+          }
+        });
+        return ' ';
       }
       return match;
     });
 
-    remainingStr = remainingStr.replace(headPrefixRegex, (match, prefix) => {
-      const parts = prefix.split(/([\s.，、\-\/@*。]+)/);
-      let confirmedEndIndex = -1;
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (/[\s.，、\-\/@*。]+/.test(part)) continue;
-        if (part.length > 1 && i > 0) break;
-        confirmedEndIndex = i;
-      }
-      if (confirmedEndIndex >= 0) {
-        const tailDigitsStr = parts.slice(0, confirmedEndIndex + 1).join('');
-        const afterTailsStr = parts.slice(confirmedEndIndex + 1).join('');
-        const digits = tailDigitsStr.match(/\d|[零一二三四五六七八九]/g);
-        if (digits) {
-          digits.forEach(d => {
-            const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-            if (head >= 0 && head <= 4) {
-              for (let i = 1; i <= 49; i++) {
-                if (Math.floor(i / 10) === head) allNumbers.push(i);
-              }
+    remainingStr = remainingStr.replace(headPrefixRegex, (match, suffix) => {
+      const digits = suffix.match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          if (head >= 0 && head <= 4) {
+            for (let i = 1; i <= 49; i++) {
+              if (Math.floor(i / 10) === head) allNumbers.push(i);
             }
-          });
-        }
-        return ' ' + afterTailsStr;
+          }
+        });
+        return ' ';
       }
       return match;
     });

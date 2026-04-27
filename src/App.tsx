@@ -64,6 +64,12 @@ export default function App() {
   const [lastSubmittedModalValue, setLastSubmittedModalValue] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [eatingHistory, setEatingHistory] = useState<{ id: string, time: string, threshold: number, totalEaten: number, distribution: Record<number, number> }[]>(() => {
+    const saved = localStorage.getItem('eatingHistory');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [eatingPage, setEatingPage] = useState(1);
+  const EATING_PER_PAGE = 5;
   const [error, setError] = useState<string | null>(null);
   const [confirmingUndoId, setConfirmingUndoId] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -109,7 +115,73 @@ export default function App() {
     }
   }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm]);
 
-  const [activeView, setActiveView] = useState<'stats' | 'compound'>('stats');
+  const [activeView, setActiveView] = useState<'stats' | 'compound' | 'eating'>('stats');
+  const [eatenAmounts, setEatenAmounts] = useState<Record<number, number>>(() => {
+    const saved = localStorage.getItem('eatenAmounts');
+    return saved ? JSON.parse(saved) : Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0]));
+  });
+  const [eatingThreshold, setEatingThreshold] = useState<number>(50000);
+
+  // Optimized solver for Eating Limit 'x'
+  const eatingLimitX = useMemo(() => {
+    const allRaw = Array.from({ length: 49 }, (_, i) => financeBetData[i + 1] || 0).sort((a, b) => a - b);
+    const n = 49;
+    
+    // We want the largest integer x such that:
+    // Net = round(Sum(min(Ri, x)) * (1 - rebate/100))
+    // Risk = Net - x * Odds >= -eatingThreshold
+    
+    const r = 1 - rebate / 100;
+    const thresh = eatingThreshold;
+
+    let bestX = 0;
+    
+    const calculateMinRisk = (x: number) => {
+      let totalToKeep = 0;
+      for (let i = 0; i < 49; i++) totalToKeep += Math.min(allRaw[i], x);
+      const net = Math.round(totalToKeep * r);
+      return net - (x * odds);
+    };
+
+    const allSums = new Array(50).fill(0);
+    for (let i = 0; i < 49; i++) allSums[i + 1] = allSums[i] + allRaw[i];
+    
+    for (let i = 0; i <= 49; i++) {
+        const d = odds - (49 - i) * r;
+        if (Math.abs(d) < 0.01) continue;
+        const candidate = (thresh + allSums[i] * r) / d;
+        const low = i === 0 ? 0 : allRaw[i - 1];
+        const high = i === 49 ? Infinity : allRaw[i];
+        
+        if (candidate >= low - 5 && candidate <= high + 5) {
+          const startX = Math.floor(candidate);
+          for (let testX = startX + 2; testX >= startX - 2; testX--) {
+            if (testX < 0) continue;
+            if (calculateMinRisk(testX) >= -thresh - 20) { 
+              bestX = testX;
+              break;
+            }
+          }
+          if (bestX > 0) break;
+        }
+    }
+    
+    return bestX || 0;
+  }, [financeBetData, eatingThreshold, odds, rebate]);
+
+  // The portion to be OFF-LOADED (Reported/上报) based on current preview
+  const previewReportedData = useMemo(() => {
+    const x = eatingLimitX;
+    return Object.fromEntries(
+      Array.from({ length: 49 }, (_, i) => {
+        const num = i + 1;
+        const raw = financeBetData[num] || 0;
+        // The part to offload is (total - min(total, x))
+        const toReport = Math.max(0, raw - x);
+        return [num, toReport];
+      })
+    );
+  }, [financeBetData, eatingLimitX]);
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
   const [drawNumbers, setDrawNumbers] = useState<(number | null)[]>(() => {
     const saved = localStorage.getItem('drawNumbers');
@@ -138,6 +210,7 @@ export default function App() {
     return Array(15).fill('');
   });
   const [isRiskModalOpen, setIsRiskModalOpen] = useState(false);
+  const [showEatingPreview, setShowEatingPreview] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const riskInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -166,6 +239,7 @@ export default function App() {
     const handleStorageSync = (e: StorageEvent) => {
       if (!e.key) return;
       if (e.key === 'financeBetData') setFinanceBetData(JSON.parse(e.newValue || '{}'));
+      if (e.key === 'eatenAmounts') setEatenAmounts(JSON.parse(e.newValue || '{}'));
       if (e.key === 'financeRecords') setFinanceRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'compoundRecords') setCompoundRecords(JSON.parse(e.newValue || '[]'));
       if (e.key === 'specialNumber') setSpecialNumber(e.newValue ? parseInt(e.newValue) : null);
@@ -186,6 +260,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('financeBetData', JSON.stringify(financeBetData));
   }, [financeBetData]);
+
+  useEffect(() => {
+    localStorage.setItem('eatenAmounts', JSON.stringify(eatenAmounts));
+  }, [eatenAmounts]);
+
+  useEffect(() => {
+    localStorage.setItem('eatingHistory', JSON.stringify(eatingHistory));
+  }, [eatingHistory]);
 
   useEffect(() => {
     localStorage.setItem('financeRecords', JSON.stringify(financeRecords));
@@ -306,6 +388,46 @@ export default function App() {
     return numbers.filter(n => riskSet.has(n)).length;
   };
 
+  const handleEatCodes = () => {
+    const nextReported = { ...previewReportedData } as Record<number, number>;
+    
+    const deltas: Record<number, number> = {};
+    let totalNewReported = 0;
+    
+    for (let i = 1; i <= 49; i++) {
+      const currentVal = nextReported[i] || 0;
+      const prevVal = eatenAmounts[i] || 0;
+      if (currentVal > prevVal) {
+        const delta = currentVal - prevVal;
+        deltas[i] = delta;
+        totalNewReported += delta;
+      }
+    }
+    
+    if (totalNewReported > 0) {
+      setEatenAmounts(nextReported);
+      
+      const newEntry = {
+        id: Date.now().toString(),
+        time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        threshold: eatingThreshold,
+        totalEaten: totalNewReported,
+        distribution: Object.fromEntries(
+          Object.entries(deltas).map(([num, val]) => [num, val])
+        )
+      };
+      setEatingHistory(prev => [newEntry, ...prev]);
+
+      setError(`已成功执行吃码上报，本次新增上报：¥${totalNewReported.toLocaleString()}。`);
+    } else {
+      setError('预览显示无需新增上报（所有号码风险均在控制范围内）。');
+    }
+  };
+
+  const handleResetEaten = () => {
+    setEatenAmounts(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])));
+    setEatingHistory([]);
+  };
   const handleUndo = (recordId: string) => {
     // Try finding in financeRecords first
     const financeRecord = financeRecords.find(r => r.id === recordId);
@@ -1207,6 +1329,13 @@ export default function App() {
                         <TrendingUp size={18} />
                         <span className="text-sm font-bold">复式管理</span>
                       </button>
+                      <button 
+                        onClick={() => { setActiveView('eating'); setIsSidebarVisible(false); }}
+                        className={`w-full h-11 flex items-center gap-3 px-4 rounded-md transition-all ${activeView === 'eating' ? 'bg-[#141414] text-white shadow-md' : 'text-gray-600 hover:bg-black/5'}`}
+                      >
+                        <Upload size={18} />
+                        <span className="text-sm font-bold">吃码上报</span>
+                      </button>
                     </div>
 
                     <div className="pt-4 space-y-1">
@@ -1569,7 +1698,7 @@ export default function App() {
                   
                   <div className="flex flex-col gap-2">
                     <button
-                      onClick={() => alert('功能开发中...')}
+                      onClick={() => setActiveView('eating')}
                       className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
                     >
                       <Upload size={20} />
@@ -1611,15 +1740,18 @@ export default function App() {
 
                   <div className="flex-1 space-y-0 pr-1 overflow-y-auto">
                     {(() => {
-                      const totalNet = financeRecords.reduce((sum, rec) => {
-                        const recGross = rec.items.reduce((s, item) => s + (item.amount * item.targets.length), 0);
-                        return sum + (recGross * (1 - rebate / 100));
+                      const actualKeptNet = (Object.entries(financeBetData) as [string, number][]).reduce((sum, [n, val]) => {
+                        const eaten = eatenAmounts[parseInt(n)] || 0;
+                        return sum + (Math.max(0, val - eaten) * (1 - rebate / 100));
                       }, 0);
+
                       return Array.from({ length: 49 }, (_, i) => {
                         const num = i + 1;
-                        const amount = financeBetData[num];
-                        const risk = totalNet - (amount * odds);
-                        return { num, amount, risk };
+                        const rawAmount = financeBetData[num] || 0;
+                        const eatenAmount = eatenAmounts[num] || 0;
+                        const activeAmount = Math.max(0, rawAmount - eatenAmount);
+                        const risk = actualKeptNet - (activeAmount * odds);
+                        return { num, amount: rawAmount, risk };
                       })
                       .sort((a, b) => a.risk - b.risk)
                       .map((item, index) => {
@@ -1648,6 +1780,284 @@ export default function App() {
                 </section>
               </div>
             </>
+          ) : activeView === 'eating' ? (
+            <div className="col-span-14 flex flex-col gap-4 h-full min-h-0">
+               {/* Eating View Header */}
+               <div className="flex items-center justify-between bg-white border border-[#141414] p-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Upload size={20} className="text-blue-600" />
+                      <h1 className="text-xl font-serif italic font-bold">吃码上报利润管理</h1>
+                    </div>
+                    <div className="h-8 w-px bg-gray-200" />
+                    <div className="flex flex-col">
+                       <span className="text-[10px] font-mono opacity-50 uppercase">当前吃码纯利</span>
+                       <span className="text-2xl font-mono font-bold text-blue-600">
+                         ¥{(Object.values(eatenAmounts) as number[]).reduce((a, b) => a + b, 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                       </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-6">
+                    <div className="flex flex-col items-end">
+                      <label className="text-[10px] font-mono font-bold uppercase opacity-50 mb-1">设定风险容忍限额 (亏损额)</label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-mono font-bold">- ¥</span>
+                        <input 
+                          type="number"
+                          value={eatingThreshold}
+                          onChange={(e) => setEatingThreshold(Math.abs(parseInt(e.target.value) || 0))}
+                          className="w-32 h-10 border-2 border-[#141414] text-center font-mono font-bold text-lg focus:bg-blue-50 outline-none"
+                        />
+                      </div>
+                    </div>
+                    <button 
+                      onClick={handleEatCodes}
+                      className="bg-blue-600 text-white px-8 py-3 font-mono font-bold hover:bg-blue-700 transition-all active:translate-y-1 shadow-[4px_4px_0_0_#141414]"
+                    >
+                      执行吃码上报
+                    </button>
+                    <button 
+                      onClick={handleResetEaten}
+                      className="bg-white border-2 border-red-600 text-red-600 px-6 py-3 font-mono font-bold hover:bg-red-50 transition-all active:translate-y-1 shadow-[4px_4px_0_0_#141414]"
+                    >
+                      清空上报
+                    </button>
+                  </div>
+               </div>
+
+               <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
+                  {/* Left: Eaten Matrix (Preview) */}
+                  <div className="col-span-8 bg-white border border-[#141414] p-4 flex flex-col h-full overflow-hidden">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <Hash size={16} />
+                        <h2 className="text-xs font-mono font-bold uppercase tracking-widest">号码分布矩阵 (吃码预览: x={eatingLimitX.toFixed(0)})</h2>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 mr-2">
+                          <input 
+                            type="checkbox" 
+                            id="show-preview"
+                            checked={showEatingPreview}
+                            onChange={(e) => setShowEatingPreview(e.target.checked)}
+                            className="w-3.5 h-3.5 border-gray-300 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                          <label htmlFor="show-preview" className="text-[11px] font-mono font-bold cursor-pointer select-none">显示吃码预警</label>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2.5 h-2.5 bg-amber-50 border border-amber-200" />
+                          <span className="text-[10px] text-gray-500 font-mono">建议上报</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2.5 h-2.5 bg-blue-50 border border-blue-200" />
+                          <span className="text-[10px] text-gray-500 font-mono">已受控</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-x-2 gap-y-1 mb-4">
+                      {(() => {
+                        const rows = 12; 
+                        const indices = [];
+                        for (let r = 0; r < rows; r++) {
+                          for (let c = 0; c < 5; c++) {
+                            let num = null;
+                            if (c === 4) {
+                              if (r === 0) num = 49;
+                            } else {
+                              num = r * 4 + c + 1;
+                            }
+                            indices.push(num);
+                          }
+                        }
+                        return indices.map((num, i) => {
+                          if (num === null) return <div key={`empty-${i}`} />;
+                          const amountRaw = financeBetData[num] || 0;
+                          const toReportTotal = (previewReportedData[num] as number) || 0;
+                          const alreadyReported = eatenAmounts[num] || 0;
+                          
+                          const ballColor = getBallTextColor(num);
+                          const zodiac = getZodiacByNumber(num);
+                          
+                          // Styling logic:
+                          // Amber: Needs NEW reporting (total suggested > already established)
+                          // Blue: Safe or already fully reported (amount > 0 and no new reporting needed)
+                          const needsMoreReport = showEatingPreview && toReportTotal > alreadyReported;
+                          const isFullyReported = showEatingPreview && toReportTotal > 0 && toReportTotal <= alreadyReported;
+                          
+                          return (
+                            <div key={num} className="flex items-center gap-1.5 h-6">
+                              <div className="w-10 flex items-center justify-between shrink-0">
+                                <span className={`text-[13px] font-mono font-bold ${ballColor}`}>
+                                  {num.toString().padStart(2, '0')}
+                                </span>
+                                <span className={`text-[11px] font-bold opacity-40 ${ballColor}`}>
+                                  {zodiac}
+                                </span>
+                              </div>
+                              <div 
+                                className={`w-18 h-6 border flex items-center justify-end px-1.5 font-mono text-[11px] font-bold transition-all ${amountRaw > 0 ? (needsMoreReport ? 'bg-amber-50 border-amber-200 text-amber-700' : (isFullyReported ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-900')) : 'bg-gray-50/50 border-gray-100 text-gray-300'}`}
+                              >
+                                {amountRaw > 0 ? amountRaw.toLocaleString() : ''}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+
+                    {/* Bottom: History Section */}
+                    <div className="mt-auto border-t border-gray-100 pt-4 flex-1 overflow-hidden flex flex-col">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <History size={14} className="opacity-50" />
+                          <h2 className="text-[10px] font-mono font-bold uppercase tracking-widest opacity-50">吃码上报录入历史</h2>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            disabled={eatingPage <= 1}
+                            onClick={() => setEatingPage(p => p - 1)}
+                            className="p-1 hover:bg-gray-100 disabled:opacity-30"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+                          <span className="text-[10px] font-mono font-bold">{eatingPage} / {Math.ceil(eatingHistory.length / EATING_PER_PAGE) || 1}</span>
+                          <button 
+                            disabled={eatingPage >= Math.ceil(eatingHistory.length / EATING_PER_PAGE)}
+                            onClick={() => setEatingPage(p => p + 1)}
+                            className="p-1 hover:bg-gray-100 disabled:opacity-30"
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex-1 overflow-y-auto space-y-1.5">
+                        {eatingHistory.length === 0 ? (
+                          <div className="py-4 text-center text-[10px] font-mono opacity-20 italic">暂无上报历史</div>
+                        ) : (
+                          eatingHistory
+                            .slice((eatingPage - 1) * EATING_PER_PAGE, eatingPage * EATING_PER_PAGE)
+                            .map(entry => (
+                              <div key={entry.id} className="border border-dashed border-gray-100 p-2 text-[11px] font-mono flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                  <span className="opacity-40">{entry.time}</span>
+                                  <span className="font-bold">控亏: ¥{entry.threshold.toLocaleString()}</span>
+                                  <span className="font-bold text-blue-600">总吃: ¥{entry.totalEaten.toLocaleString()}</span>
+                                </div>
+                                <div className="flex flex-wrap gap-x-2 gap-y-0.5 max-w-[350px] justify-end">
+                                   {Object.entries(entry.distribution)
+                                     .sort(([a], [b]) => parseInt(a) - parseInt(b))
+                                     .map(([num, amount]) => (
+                                       <div key={num} className="flex items-center gap-0.5">
+                                         <span className={`text-[10px] font-bold ${getBallTextColor(parseInt(num))}`}>{num.padStart(2, '0')}</span>
+                                         <span className="opacity-40">:</span>
+                                         <span className="bg-blue-50 px-0.5 rounded-sm text-[10px] text-blue-700">¥{(amount as number).toLocaleString()}</span>
+                                       </div>
+                                     ))
+                                   }
+                                </div>
+                              </div>
+                            ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Risk Comparison (Initial vs Eating) */}
+                  <div className="col-span-4 bg-white border border-[#141414] flex flex-col h-full overflow-hidden">
+                    <div className="grid grid-cols-2 h-full">
+                      {/* Sub-column 1: Current Actual Risk (With existing reports) */}
+                      <div className="border-r border-gray-100 flex flex-col min-h-0">
+                        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-100 bg-gray-50/50">
+                          <h2 className="text-[10px] font-mono font-bold uppercase tracking-widest opacity-50">当前实地风险 (含已上报)</h2>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                          {(() => {
+                            const currentKeptMap: Record<number, number> = {};
+                            let totalKeptGross = 0;
+                            for (let i = 1; i <= 49; i++) {
+                              const kept = (financeBetData[i] || 0) - (eatenAmounts[i] || 0);
+                              currentKeptMap[i] = Math.max(0, kept);
+                              totalKeptGross += currentKeptMap[i];
+                            }
+                            const currentNet = Math.round(totalKeptGross * (1 - rebate / 100));
+
+                            return Array.from({ length: 49 }, (_, i) => {
+                              const num = i + 1;
+                              const keptAmount = currentKeptMap[num];
+                              const risk = currentNet - (keptAmount * odds);
+                              return { num, amount: keptAmount, risk };
+                            })
+                            .sort((a, b) => a.risk - b.risk)
+                            .map((item, index) => {
+                              const textColor = getBallTextColor(item.num);
+                              return (
+                                <div key={item.num} className="py-1 px-2 border-b border-gray-50 flex items-center justify-between">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] font-mono opacity-30 w-3">{index + 1}</span>
+                                    <span className={`text-[11px] font-mono font-bold ${textColor}`}>{item.num.toString().padStart(2, '0')}</span>
+                                    <span className="text-[10px] font-mono opacity-50 ml-1">¥{item.amount.toLocaleString()}</span>
+                                  </div>
+                                  <span className={`text-[10px] font-mono font-bold ${item.risk < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                                    {item.risk < 0 ? '-' : ''}{Math.abs(item.risk).toLocaleString()}
+                                  </span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Sub-column 2: Proposed Risk (After execution of NEW report) */}
+                      <div className="flex flex-col min-h-0">
+                        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-100 bg-blue-50/30">
+                          <h2 className="text-[10px] font-mono font-bold uppercase tracking-widest text-blue-600">拟执行后风险 (目标控制)</h2>
+                        </div>
+                        <div className="flex-1 overflow-y-auto bg-blue-50/5">
+                          {(() => {
+                            // Proposed Kept = Total - previewReportedData
+                            const proposedKeptMap: Record<number, number> = {};
+                            let totalProposedKeptGross = 0;
+                            for (let i = 1; i <= 49; i++) {
+                              const reported = (previewReportedData[i] as number) || 0;
+                              const kept = (financeBetData[i] || 0) - reported;
+                              proposedKeptMap[i] = Math.max(0, kept);
+                              totalProposedKeptGross += proposedKeptMap[i];
+                            }
+                            const proposedNet = Math.round(totalProposedKeptGross * (1 - rebate / 100));
+                            
+                            return Array.from({ length: 49 }, (_, i) => {
+                              const num = i + 1;
+                              const keptAmount = proposedKeptMap[num];
+                              const risk = proposedNet - (keptAmount * odds);
+                              return { num, amount: keptAmount, risk };
+                            })
+                            .sort((a, b) => a.risk - b.risk)
+                            .map((item, index) => {
+                              const textColor = getBallTextColor(item.num);
+                              const isControlled = item.risk < -eatingThreshold + 10;
+                              return (
+                                <div key={item.num} className={`py-1 px-2 border-b border-gray-50 flex items-center justify-between ${isControlled ? 'bg-blue-100/50' : ''}`}>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] font-mono opacity-30 w-3">{index + 1}</span>
+                                    <span className={`text-[11px] font-mono font-bold ${textColor}`}>{item.num.toString().padStart(2, '0')}</span>
+                                    <span className="text-[10px] font-mono font-bold text-blue-700 ml-1">¥{item.amount.toLocaleString()}</span>
+                                  </div>
+                                  <span className={`text-[10px] font-mono font-bold ${item.risk < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                    {item.risk < 0 ? '-' : ''}{Math.abs(item.risk).toLocaleString()}
+                                  </span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+               </div>
+            </div>
           ) : (
             <>
               {/* Compound Management View */}
