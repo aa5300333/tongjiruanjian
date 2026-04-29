@@ -124,49 +124,22 @@ export default function App() {
 
   // Optimized solver for Eating Limit 'x'
   const eatingLimitX = useMemo(() => {
-    const allRaw = Array.from({ length: 49 }, (_, i) => financeBetData[i + 1] || 0).sort((a, b) => a - b);
-    const n = 49;
+    const allRaw = Array.from({ length: 49 }, (_, i) => financeBetData[i + 1] || 0);
+    const totalOriginalTurnover = allRaw.reduce((s, v) => s + v, 0);
     
     // We want the largest integer x such that:
-    // Net = round(Sum(min(Ri, x)) * (1 - rebate/100))
-    // Risk = Net - x * Odds >= -eatingThreshold
+    // ProfitLoss = TotalOriginalTurnover - (x * odds) - (TotalOriginalTurnover * rebate/100)
+    // ProfitLoss >= -eatingThreshold
     
     const r = 1 - rebate / 100;
     const thresh = eatingThreshold;
-
-    let bestX = 0;
     
-    const calculateMinRisk = (x: number) => {
-      let totalToKeep = 0;
-      for (let i = 0; i < 49; i++) totalToKeep += Math.min(allRaw[i], x);
-      const net = Math.round(totalToKeep * r);
-      return net - (x * odds);
-    };
-
-    const allSums = new Array(50).fill(0);
-    for (let i = 0; i < 49; i++) allSums[i + 1] = allSums[i] + allRaw[i];
+    // TotalOriginalTurnover * r - x * odds >= -thresh
+    // x * odds <= TotalOriginalTurnover * r + thresh
+    // x = (TotalOriginalTurnover * r + thresh) / odds
     
-    for (let i = 0; i <= 49; i++) {
-        const d = odds - (49 - i) * r;
-        if (Math.abs(d) < 0.01) continue;
-        const candidate = (thresh + allSums[i] * r) / d;
-        const low = i === 0 ? 0 : allRaw[i - 1];
-        const high = i === 49 ? Infinity : allRaw[i];
-        
-        if (candidate >= low - 5 && candidate <= high + 5) {
-          const startX = Math.floor(candidate);
-          for (let testX = startX + 2; testX >= startX - 2; testX--) {
-            if (testX < 0) continue;
-            if (calculateMinRisk(testX) >= -thresh - 20) { 
-              bestX = testX;
-              break;
-            }
-          }
-          if (bestX > 0) break;
-        }
-    }
-    
-    return bestX || 0;
+    const candidateX = (totalOriginalTurnover * r + thresh) / odds;
+    return Math.floor(candidateX);
   }, [financeBetData, eatingThreshold, odds, rebate]);
 
   // The portion to be OFF-LOADED (Reported/上报) based on current preview
@@ -309,7 +282,22 @@ export default function App() {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modalInputRef = useRef<HTMLTextAreaElement>(null);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+  const standalonePreviewScrollRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
+
+  // Auto-scroll preview to bottom when input changes
+  useEffect(() => {
+    if (previewScrollRef.current) {
+      previewScrollRef.current.scrollTop = previewScrollRef.current.scrollHeight;
+    }
+  }, [modalInputValue, isModalOpen]);
+
+  useEffect(() => {
+    if (standalonePreviewScrollRef.current) {
+      standalonePreviewScrollRef.current.scrollTop = standalonePreviewScrollRef.current.scrollHeight;
+    }
+  }, [modalInputValue, standaloneMode]);
 
   const totalTurnover = useMemo(() => {
     return Object.values(financeBetData).reduce((sum: number, val: number) => sum + val, 0);
@@ -1181,7 +1169,10 @@ export default function App() {
                 估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
               </span>
             </div>
-            <div className="flex-1 w-full p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner">
+            <div 
+              ref={standalonePreviewScrollRef}
+              className="flex-1 w-full p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner"
+            >
               {formatModalResults(modalInputValue).preview}
             </div>
           </div>
@@ -1740,17 +1731,15 @@ export default function App() {
 
                   <div className="flex-1 space-y-0 pr-1 overflow-y-auto">
                     {(() => {
-                      const actualKeptNet = (Object.entries(financeBetData) as [string, number][]).reduce((sum, [n, val]) => {
-                        const eaten = eatenAmounts[parseInt(n)] || 0;
-                        return sum + (Math.max(0, val - eaten) * (1 - rebate / 100));
-                      }, 0);
+                      const totalGross = (Object.values(financeBetData) as number[]).reduce((s, v) => s + v, 0);
+                      const netTurnover = totalGross * (1 - rebate / 100);
 
                       return Array.from({ length: 49 }, (_, i) => {
                         const num = i + 1;
                         const rawAmount = financeBetData[num] || 0;
                         const eatenAmount = eatenAmounts[num] || 0;
                         const activeAmount = Math.max(0, rawAmount - eatenAmount);
-                        const risk = actualKeptNet - (activeAmount * odds);
+                        const risk = netTurnover - (activeAmount * odds);
                         return { num, amount: rawAmount, risk };
                       })
                       .sort((a, b) => a.risk - b.risk)
@@ -1975,19 +1964,13 @@ export default function App() {
                         </div>
                         <div className="flex-1 overflow-y-auto">
                           {(() => {
-                            const currentKeptMap: Record<number, number> = {};
-                            let totalKeptGross = 0;
-                            for (let i = 1; i <= 49; i++) {
-                              const kept = (financeBetData[i] || 0) - (eatenAmounts[i] || 0);
-                              currentKeptMap[i] = Math.max(0, kept);
-                              totalKeptGross += currentKeptMap[i];
-                            }
-                            const currentNet = Math.round(totalKeptGross * (1 - rebate / 100));
+                            const totalGross = (Object.values(financeBetData) as number[]).reduce((s, v) => s + v, 0);
+                            const netTurnover = totalGross * (1 - rebate / 100);
 
                             return Array.from({ length: 49 }, (_, i) => {
                               const num = i + 1;
-                              const keptAmount = currentKeptMap[num];
-                              const risk = currentNet - (keptAmount * odds);
+                              const keptAmount = Math.max(0, (financeBetData[num] || 0) - (eatenAmounts[num] || 0));
+                              const risk = netTurnover - (keptAmount * odds);
                               return { num, amount: keptAmount, risk };
                             })
                             .sort((a, b) => a.risk - b.risk)
@@ -2017,21 +2000,14 @@ export default function App() {
                         </div>
                         <div className="flex-1 overflow-y-auto bg-blue-50/5">
                           {(() => {
-                            // Proposed Kept = Total - previewReportedData
-                            const proposedKeptMap: Record<number, number> = {};
-                            let totalProposedKeptGross = 0;
-                            for (let i = 1; i <= 49; i++) {
-                              const reported = (previewReportedData[i] as number) || 0;
-                              const kept = (financeBetData[i] || 0) - reported;
-                              proposedKeptMap[i] = Math.max(0, kept);
-                              totalProposedKeptGross += proposedKeptMap[i];
-                            }
-                            const proposedNet = Math.round(totalProposedKeptGross * (1 - rebate / 100));
+                            const totalGross = (Object.values(financeBetData) as number[]).reduce((s, v) => s + v, 0);
+                            const netTurnover = totalGross * (1 - rebate / 100);
                             
                             return Array.from({ length: 49 }, (_, i) => {
                               const num = i + 1;
-                              const keptAmount = proposedKeptMap[num];
-                              const risk = proposedNet - (keptAmount * odds);
+                              const reported = (previewReportedData[num] as number) || 0;
+                              const keptAmount = Math.max(0, (financeBetData[num] || 0) - reported);
+                              const risk = netTurnover - (keptAmount * odds);
                               return { num, amount: keptAmount, risk };
                             })
                             .sort((a, b) => a.risk - b.risk)
@@ -2367,7 +2343,10 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <div className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner">
+                  <div 
+                    ref={previewScrollRef}
+                    className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner"
+                  >
                     {formatModalResults(modalInputValue).preview}
                   </div>
                 </div>
