@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { 
   Calculator, 
   RotateCcw, 
@@ -122,39 +122,89 @@ export default function App() {
   });
   const [eatingThreshold, setEatingThreshold] = useState<number>(50000);
 
-  // Optimized solver for Eating Limit 'x'
-  const eatingLimitX = useMemo(() => {
-    const allRaw = Array.from({ length: 49 }, (_, i) => financeBetData[i + 1] || 0);
-    const totalOriginalTurnover = allRaw.reduce((s, v) => s + v, 0);
-    
-    // We want the largest integer x such that:
-    // ProfitLoss = TotalOriginalTurnover - (x * odds) - (TotalOriginalTurnover * rebate/100)
-    // ProfitLoss >= -eatingThreshold
-    
-    const r = 1 - rebate / 100;
-    const thresh = eatingThreshold;
-    
-    // TotalOriginalTurnover * r - x * odds >= -thresh
-    // x * odds <= TotalOriginalTurnover * r + thresh
-    // x = (TotalOriginalTurnover * r + thresh) / odds
-    
-    const candidateX = (totalOriginalTurnover * r + thresh) / odds;
-    return Math.floor(candidateX);
-  }, [financeBetData, eatingThreshold, odds, rebate]);
-
-  // The portion to be OFF-LOADED (Reported/上报) based on current preview
+  // Refined iterative solver for Reporting (Preview Reported Data)
   const previewReportedData = useMemo(() => {
-    const x = eatingLimitX;
+    // 1. Initial kept bets = Current Field Bets (Total - Already Eaten)
+    // "要在已上报实地风险进行计算" - This means the solver starts from the current situation
+    let currentKept: Record<number, number> = {};
+    for (let i = 1; i <= 49; i++) {
+      currentKept[i] = Math.max(0, (financeBetData[i] || 0) - (eatenAmounts[i] || 0));
+    }
+
+    const r = 1 - rebate / 100; // (1 - R_avg)
+    const M = eatingThreshold;
+    const O = odds;
+
+    if (O <= 0) return Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0]));
+
+    // 2. Loop until no changes
+    let iterations = 0;
+    while (iterations < 1000) { // Safety circuit breaker
+      let changed = false;
+      
+      // Calculate current NetIncome (Sum of each kept bet * (1 - rebate))
+      const totalKeptGross = (Object.values(currentKept) as number[]).reduce((s, v) => s + v, 0);
+      const netIncome = Math.round(totalKeptGross * r);
+
+      for (let i = 1; i <= 49; i++) {
+        // Limit[i] = Math.round((NetIncome + M) / Odds)
+        const limit = Math.round((netIncome + M) / O);
+        const val = currentKept[i] || 0;
+        
+        // If current Field Bet[i] > Limit[i]
+        if (val > limit) { 
+          // Update to rounded Limit[i]
+          currentKept[i] = limit;
+          // Mark as changed and restart loop (as NetIncome decreased)
+          changed = true;
+          break; 
+        }
+      }
+      
+      if (!changed) break;
+      iterations++;
+    }
+
+    // 3. Total suggested reported amount = original total - final remaining field
     return Object.fromEntries(
       Array.from({ length: 49 }, (_, i) => {
         const num = i + 1;
-        const raw = financeBetData[num] || 0;
-        // The part to offload is (total - min(total, x))
-        const toReport = Math.max(0, raw - x);
-        return [num, toReport];
+        const origin = financeBetData[num] || 0;
+        const kept = Math.round(currentKept[num] || 0);
+        return [num, Math.max(0, origin - kept)];
       })
     );
-  }, [financeBetData, eatingLimitX]);
+  }, [financeBetData, rebate, eatingThreshold, odds, eatenAmounts]);
+
+  // For UI display, we still calculate a "theoretical limit X" based on the final pool
+  const eatingLimitX = useMemo(() => {
+    const totalKept = (Object.values(financeBetData) as number[]).reduce((sum, val, idx) => {
+      const reported = (previewReportedData[idx + 1] as number) || 0;
+      return sum + (val - reported);
+    }, 0);
+    const netIncome = totalKept * (1 - rebate / 100);
+    return Math.round((netIncome + eatingThreshold) / odds);
+  }, [financeBetData, previewReportedData, rebate, eatingThreshold, odds]);
+
+  // Refined Risk calculation function following: NetIncome - Payout = Profit/Loss
+  const calculateRisk = useCallback((num: number, currentBetData: Record<number, number>, currentEaten: Record<number, number>) => {
+    const keptAmounts = Array.from({ length: 49 }, (_, i) => {
+      const n = i + 1;
+      return Math.max(0, (currentBetData[n] || 0) - (currentEaten[n] || 0));
+    });
+    
+    const totalKeptGross = keptAmounts.reduce((s, v) => s + v, 0);
+    const netIncome = Math.round(totalKeptGross * (1 - rebate / 100)); // 实收 = 总下注 * (1 - 反水)
+    
+    const targetKeptAmount = Math.max(0, (currentBetData[num] || 0) - (currentEaten[num] || 0));
+    const payout = Math.round(targetKeptAmount * odds);
+    
+    // Risk = Net Income - Payout
+    return netIncome - payout;
+  }, [rebate, odds]);
+
+  // The portion to be OFF-LOADED (Reported/上报) based on current preview
+  // Logic now handled iteratively above
   const [modalMode, setModalMode] = useState<'save' | 'deduct'>('save');
   const [drawNumbers, setDrawNumbers] = useState<(number | null)[]>(() => {
     const saved = localStorage.getItem('drawNumbers');
@@ -423,7 +473,7 @@ export default function App() {
       const newBetData = { ...financeBetData };
       financeRecord.items.forEach(item => {
         item.targets.forEach(num => {
-          newBetData[num] = Math.max(0, Number((newBetData[num] - item.amount).toFixed(2)));
+          newBetData[num] = Math.max(0, Math.round(newBetData[num] - item.amount));
         });
       });
 
@@ -570,7 +620,7 @@ export default function App() {
         results.forEach(res => {
           const grossAmount = isNegative ? -res.amount : res.amount;
           res.numbers.forEach(num => {
-            newBetData[num] = Number((newBetData[num] + grossAmount).toFixed(2));
+            newBetData[num] = Math.max(0, Math.round(newBetData[num] + grossAmount));
           });
           const matchCount = getRiskMatchCount(res.numbers);
           items.push({
@@ -853,9 +903,9 @@ export default function App() {
         }
 
         return {
-          winningStake: winningStake > 0 ? (isDeduct ? -Number(winningStake.toFixed(2)) : Number(winningStake.toFixed(2))) : "",
-          payout: Number(payout.toFixed(2)),
-          totalAmount: isDeduct ? -Math.abs(record.totalAmount) : Math.abs(record.totalAmount),
+          winningStake: winningStake > 0 ? (isDeduct ? -Math.round(winningStake) : Math.round(winningStake)) : "",
+          payout: Math.round(payout),
+          totalAmount: isDeduct ? -Math.round(Math.abs(record.totalAmount)) : Math.round(Math.abs(record.totalAmount)),
           fullRaw: record.fullRaw || record.raw || '',
           parsedPreview: displayPreview,
           isDeduct: isDeduct
@@ -1587,7 +1637,7 @@ export default function App() {
                                     <span className="text-[10px] font-mono font-bold bg-yellow-400 px-1 rounded">中金: ¥{winningAmount}</span>
                                   )}
                                   <span className={`text-[11px] font-mono font-bold ${record.totalAmount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                    {record.totalAmount >= 0 ? '+' : ''}¥{record.totalAmount.toFixed(1)}
+                                    {record.totalAmount >= 0 ? '+' : ''}¥{Math.round(record.totalAmount)}
                                   </span>
                                   <button 
                                     onClick={() => setConfirmingUndoId(record.id)}
@@ -1731,15 +1781,10 @@ export default function App() {
 
                   <div className="flex-1 space-y-0 pr-1 overflow-y-auto">
                     {(() => {
-                      const totalGross = (Object.values(financeBetData) as number[]).reduce((s, v) => s + v, 0);
-                      const netTurnover = totalGross * (1 - rebate / 100);
-
                       return Array.from({ length: 49 }, (_, i) => {
                         const num = i + 1;
                         const rawAmount = financeBetData[num] || 0;
-                        const eatenAmount = eatenAmounts[num] || 0;
-                        const activeAmount = Math.max(0, rawAmount - eatenAmount);
-                        const risk = netTurnover - (activeAmount * odds);
+                        const risk = calculateRisk(num, financeBetData, eatenAmounts);
                         return { num, amount: rawAmount, risk };
                       })
                       .sort((a, b) => a.risk - b.risk)
@@ -1964,13 +2009,10 @@ export default function App() {
                         </div>
                         <div className="flex-1 overflow-y-auto">
                           {(() => {
-                            const totalGross = (Object.values(financeBetData) as number[]).reduce((s, v) => s + v, 0);
-                            const netTurnover = totalGross * (1 - rebate / 100);
-
                             return Array.from({ length: 49 }, (_, i) => {
                               const num = i + 1;
                               const keptAmount = Math.max(0, (financeBetData[num] || 0) - (eatenAmounts[num] || 0));
-                              const risk = netTurnover - (keptAmount * odds);
+                              const risk = calculateRisk(num, financeBetData, eatenAmounts);
                               return { num, amount: keptAmount, risk };
                             })
                             .sort((a, b) => a.risk - b.risk)
@@ -2000,14 +2042,11 @@ export default function App() {
                         </div>
                         <div className="flex-1 overflow-y-auto bg-blue-50/5">
                           {(() => {
-                            const totalGross = (Object.values(financeBetData) as number[]).reduce((s, v) => s + v, 0);
-                            const netTurnover = totalGross * (1 - rebate / 100);
-                            
                             return Array.from({ length: 49 }, (_, i) => {
                               const num = i + 1;
                               const reported = (previewReportedData[num] as number) || 0;
                               const keptAmount = Math.max(0, (financeBetData[num] || 0) - reported);
-                              const risk = netTurnover - (keptAmount * odds);
+                              const risk = calculateRisk(num, financeBetData, previewReportedData);
                               return { num, amount: keptAmount, risk };
                             })
                             .sort((a, b) => a.risk - b.risk)
@@ -2721,7 +2760,7 @@ export default function App() {
                               <span className="text-[11pt] font-bold bg-yellow-400 px-1 rounded">中金: ¥{winningAmount}</span>
                             )}
                             <span className={`text-[11pt] font-bold ${record.totalAmount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {record.totalAmount >= 0 ? '+' : ''}¥{record.totalAmount.toFixed(1)}
+                              {record.totalAmount >= 0 ? '+' : ''}¥{Math.round(record.totalAmount)}
                             </span>
                             <button 
                               onClick={() => setConfirmingUndoId(record.id)}
