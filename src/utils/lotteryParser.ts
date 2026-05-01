@@ -71,7 +71,7 @@ export interface ParseResult {
 }
 
 export const STRONG_KEYWORDS = [
-  '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '一个', '各', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
+  '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '各粒', '一个', '各', '粒', '各位', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
 ];
 // 弱关键字：仅在数字 >= 50 或有币种后缀时才视为金额锚点
 export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X', '#'];
@@ -127,17 +127,21 @@ function smartSplitDigits(nStr: string): number[] {
   if (nStr.length >= 3 && parseInt(nStr, 10) > 49) {
     if (!/^\d+$/.test(nStr)) return [];
     
-    // For 3-digit strings like "369", if all digits are 1-9, prefer 3 separate numbers.
-    // This is common for "369尾" or "369头" cases even if the tail suffix was missed.
+    // For 3-digit strings like "369" or "123", if each digit is a valid small number (or if explicitly part of head/tail patterns later)
+    // Avoid splitting "100", "200" into "01"
     if (nStr.length === 3) {
+      if (nStr === '100' || nStr === '200' || nStr === '300' || nStr === '400' || nStr === '500') return [];
+      
       const d1 = parseInt(nStr[0], 10);
       const d2 = parseInt(nStr[1], 10);
       const d3 = parseInt(nStr[2], 10);
       const res = [];
-      if (d1 >= 1 && d1 <= 49) res.push(d1);
-      if (d2 >= 1 && d2 <= 49) res.push(d2);
-      if (d3 >= 1 && d3 <= 49) res.push(d3);
-      return res;
+      if (d1 >= 1 && d1 <= 9) res.push(d1);
+      if (d2 >= 1 && d2 <= 9) res.push(d2);
+      if (d3 >= 1 && d3 <= 9) res.push(d3);
+      // Only return if we actually matched all digits or it's a known pattern
+      if (res.length === 3) return res;
+      return [];
     }
     
     // Otherwise try two-by-two splitting
@@ -231,7 +235,7 @@ export function parseInput(input: string): ParseResult[] {
   const cleaned = withoutSummary.replace(headerRegex, '');
 
   // 3. 范围处理 (e.g. 1到5各10)
-  const rangeProcessed = cleaned.replace(/(\d+)\s*(?:到|至)\s*(\d+)\s*(各|字|买|下|压)/g, (match, start, end, suffix) => {
+  const rangeProcessed = cleaned.replace(/(\d+)\s*(?:到|至)\s*(\d+)\s*(各|各粒|字|买|下|压)/g, (match, start, end, suffix) => {
     const s = parseInt(start, 10);
     const e = parseInt(end, 10);
     if (isNaN(s) || isNaN(e) || s > e || e > 49) return match;
@@ -240,7 +244,7 @@ export function parseInput(input: string): ParseResult[] {
     return nums.join(' ') + suffix;
   });
 
-  const rawChunks = rangeProcessed.split(/[\n\r;；。]+/).map(l => l.trim()).filter(l => l);
+  const rawChunks = rangeProcessed.split(/[\n\r;；]+/).map(l => l.trim()).filter(l => l);
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
@@ -284,14 +288,15 @@ export function parseInput(input: string): ParseResult[] {
 function checkHasAnchor(text: string): boolean {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'g');
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'gi');
   if (strongRegex.test(text)) return true;
 
   const weakPattern = WEAK_KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'g');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'gi');
   
   // 对于“号”字做特殊判定：
   let m;
+  weakRegex.lastIndex = 0;
   while ((m = weakRegex.exec(text)) !== null) {
     const keyword = m[1];
     const amountStr = m[2] || m[3];
@@ -303,35 +308,33 @@ function checkHasAnchor(text: string): boolean {
       if (/[\d一二三四五六七八九十百千万]/.test(beforeChar)) {
         continue;
       }
-      // 如果前方是其他汉字，作为金额分隔符 (视为金额锚点，或者作为特殊标记)
-      if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百千万]/.test(beforeChar)) {
-        return true; 
-      }
     }
     // “元”字作为强力金额终止符，直接返回 true
     if (text.includes('元')) return true;
     if (val >= 50) return true;
   }
 
-  // 特殊识别：数字 + 元
   if (/(?:\d+|[一二三四五六七八九十百千万]+)\s*元/.test(text)) return true;
 
-  // 默认换行符前一个数字为金额
-  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.]*$/gi;
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.粒]*$/gi;
   const eolMatch = endOfLineAmountRegex.exec(text);
   if (eolMatch) {
     const amountStr = eolMatch[1] || eolMatch[2];
     const val = amountStr ? (/^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr)) : 0;
     
+    // 如果 val >= 50，通常是金额
+    if (val >= 50) return true;
+
     const rawBeforeText = text.substring(0, eolMatch.index);
-    const connectors = rawBeforeText.match(/[\s,，、。#\-/*@.]/g);
-    
-    // 如果连接符高频出现且数字在 1-49 范围内，认为这是数据而非金额
-    if (connectors) {
-      const lastChar = connectors[connectors.length - 1];
-      const charCount = (rawBeforeText.split(lastChar).length - 1);
-      if (charCount >= 2 && val <= 49) {
-        return false;
+    // 检查分隔符是否包含 。 , 等，如果这些 separator 被用于数字间，不应轻易把末尾数字当金额
+    const numbersBefore = rawBeforeText.match(/\d+/g);
+    if (numbersBefore && numbersBefore.length >= 2) {
+      // 如果末尾数字跟前面的数字使用了相同的分隔符，且 val <= 49，大概率是数据
+      const lastConnector = rawBeforeText.slice(-1);
+      if (/[\s,，、。#\-/*@.]/.test(lastConnector) && val <= 49) {
+        // 如果分隔符在前面出现过，则极大可能是列表
+        const beforeLastConnector = rawBeforeText.slice(0, -1);
+        if (beforeLastConnector.includes(lastConnector)) return false;
       }
     }
     return true;
@@ -346,11 +349,11 @@ function checkHasAnchor(text: string): boolean {
 function findAllAnchors(text: string): { index: number, length: number, keyword: string }[] {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个]*`, 'gi');
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒]*`, 'gi');
 
   const sortedWeak = [...WEAK_KEYWORDS].sort((a, b) => b.length - a.length);
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))(?:元|米|斤|块|位|个|一个)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d{2,}|[一二三四五六七八九十百千万]+)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.]*(\\d+)(?=[\\s,，、;；。/*@.]|$)`, 'gi');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))(?:元|米|斤|块|位|个|一个|粒)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.粒]*(\\d{2,}|[一二三四五六七八九十百千万]+)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.粒]*(\\d+)(?=[\\s,，、;；。/*@.粒]|$)`, 'gi');
 
   const yuanSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/gi;
   const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.[\]()【】])(\d{2,})/g;
@@ -522,7 +525,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 规则：强度优先 (Strong > Weak)，位置优先 (Right-most)，长度优先 (Longer wins)
   const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
   const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个]*`, 'g');
+  const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒]*`, 'g');
   const yuanRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/g;
 
   const matches: { keyword: string, amount: string, index: number, length: number, isStrong: boolean }[] = [];
@@ -618,7 +621,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
     // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色]`, 'g');
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色粒]`, 'g');
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;
