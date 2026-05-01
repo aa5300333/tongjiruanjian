@@ -286,61 +286,7 @@ export function parseInput(input: string): ParseResult[] {
  * 辅助：检查字符串中是否包含任何金额锚点
  */
 function checkHasAnchor(text: string): boolean {
-  const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
-  const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'gi');
-  if (strongRegex.test(text)) return true;
-
-  const weakPattern = WEAK_KEYWORDS.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))`, 'gi');
-  
-  // 对于“号”字做特殊判定：
-  let m;
-  weakRegex.lastIndex = 0;
-  while ((m = weakRegex.exec(text)) !== null) {
-    const keyword = m[1];
-    const amountStr = m[2] || m[3];
-    const val = amountStr ? ( /^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr) ) : 0;
-    const matchIndex = m.index;
-    if (keyword === '号') {
-      const beforeChar = text.substring(0, matchIndex).trim().slice(-1);
-      // 如果前方是数字，则不视为金额锚点 (作为数据分隔符)
-      if (/[\d一二三四五六七八九十百千万]/.test(beforeChar)) {
-        continue;
-      }
-    }
-    // “元”字作为强力金额终止符，直接返回 true
-    if (text.includes('元')) return true;
-    if (val >= 50) return true;
-  }
-
-  if (/(?:\d+|[一二三四五六七八九十百千万]+)\s*元/.test(text)) return true;
-
-  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.粒]*$/gi;
-  const eolMatch = endOfLineAmountRegex.exec(text);
-  if (eolMatch) {
-    const amountStr = eolMatch[1] || eolMatch[2];
-    const val = amountStr ? (/^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr)) : 0;
-    
-    // 如果 val >= 50，通常是金额
-    if (val >= 50) return true;
-
-    const rawBeforeText = text.substring(0, eolMatch.index);
-    // 检查分隔符是否包含 。 , 等，如果这些 separator 被用于数字间，不应轻易把末尾数字当金额
-    const numbersBefore = rawBeforeText.match(/\d+/g);
-    if (numbersBefore && numbersBefore.length >= 2) {
-      // 如果末尾数字跟前面的数字使用了相同的分隔符，且 val <= 49，大概率是数据
-      const lastConnector = rawBeforeText.slice(-1);
-      if (/[\s,，、。#\-/*@.]/.test(lastConnector) && val <= 49) {
-        // 如果分隔符在前面出现过，则极大可能是列表
-        const beforeLastConnector = rawBeforeText.slice(0, -1);
-        if (beforeLastConnector.includes(lastConnector)) return false;
-      }
-    }
-    return true;
-  }
-
-  return false;
+  return findAllAnchors(text).length > 0;
 }
 
 /**
@@ -357,7 +303,7 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
 
   const yuanSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/gi;
   const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.[\]()【】])(\d{2,})/g;
-  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.]*$/gi;
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.粒米斤块位个]*$/gi;
 
   const matches: { index: number, length: number, keyword: string }[] = [];
   let m;
@@ -538,7 +484,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     
     // 弱锚点校验：如果金额 < 50 且没有强币种后缀，则不将其视为金额锚点
     if (!isStrong) {
-      if (val < 50 && !segment.includes('元')) continue;
+      const hasUnit = /[元米斤块位个粒]/.test(m[0]);
+      if (val < 50 && !hasUnit) continue;
     }
 
     matches.push({

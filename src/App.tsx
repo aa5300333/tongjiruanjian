@@ -73,6 +73,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [confirmingUndoId, setConfirmingUndoId] = useState<string | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [undoModalFocus, setUndoModalFocus] = useState<'confirm' | 'cancel'>('cancel');
   const [showLastUndoConfirm, setShowLastUndoConfirm] = useState(false);
   const [undoCallback, setUndoCallback] = useState<{ fn: () => void, label: string } | null>(null);
   const [enableSearchUndo, setEnableSearchUndo] = useState<boolean>(() => {
@@ -114,6 +115,44 @@ export default function App() {
       setTempRequireUndoPasteConfirm(requireUndoPasteConfirm);
     }
   }, [isSettingsOpen, odds, rebate, enableSearchUndo, requireUndoConfirm, requireUndoPasteConfirm]);
+
+  // Reset modal focus when it opens
+  useEffect(() => {
+    if (showLastUndoConfirm) {
+      setUndoModalFocus('cancel');
+    }
+  }, [showLastUndoConfirm]);
+
+  // Handle keyboard navigation for Undo Confirm Modal
+  useEffect(() => {
+    if (!showLastUndoConfirm) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!showLastUndoConfirm) return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setUndoModalFocus(prev => prev === 'confirm' ? 'cancel' : 'confirm');
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (undoModalFocus === 'confirm') {
+          undoCallback?.fn();
+        }
+        setShowLastUndoConfirm(false);
+        setUndoCallback(null);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setShowLastUndoConfirm(false);
+        setUndoCallback(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [showLastUndoConfirm, undoModalFocus, undoCallback]);
 
   const [activeView, setActiveView] = useState<'stats' | 'compound' | 'eating'>('stats');
   const [eatenAmounts, setEatenAmounts] = useState<Record<number, number>>(() => {
@@ -1202,6 +1241,7 @@ export default function App() {
               value={modalInputValue}
               onChange={(e) => setModalInputValue(e.target.value)}
               onKeyDown={(e) => {
+                if (showLastUndoConfirm) return;
                 if (e.key === 'Enter' && e.shiftKey) {
                   e.preventDefault();
                   handleParse(false, modalInputValue);
@@ -1284,25 +1324,33 @@ export default function App() {
                   <span className="text-xs font-mono font-bold text-red-600 break-words">{undoCallback?.label}</span>
                 </div>
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => {
-                      undoCallback?.fn();
-                      setShowLastUndoConfirm(false);
-                      setUndoCallback(null);
-                    }}
-                    className="flex-1 bg-red-600 text-white py-2 font-mono text-[10px] font-bold hover:bg-red-700 transition-colors"
-                  >
-                    确认撤销
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setShowLastUndoConfirm(false);
-                      setUndoCallback(null);
-                    }}
-                    className="flex-1 border-2 border-[#141414] py-2 font-mono text-[10px] font-bold hover:bg-[#141414] hover:text-white transition-all"
-                  >
-                    取消
-                  </button>
+                    <button 
+                      onClick={() => {
+                        undoCallback?.fn();
+                        setShowLastUndoConfirm(false);
+                        setUndoCallback(null);
+                      }}
+                      className={`flex-1 border-2 border-[#141414] py-2 font-mono text-[10px] font-bold transition-all ${
+                        undoModalFocus === 'confirm' 
+                          ? 'bg-red-600 text-white translate-x-[1px] translate-y-[1px] shadow-none' 
+                          : 'bg-white text-[#141414] shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                      }`}
+                    >
+                      确认撤销
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setShowLastUndoConfirm(false);
+                        setUndoCallback(null);
+                      }}
+                      className={`flex-1 border-2 border-[#141414] py-2 font-mono text-[10px] font-bold transition-all ${
+                        undoModalFocus === 'cancel' 
+                          ? 'bg-red-600 text-white translate-x-[1px] translate-y-[1px] shadow-none' 
+                          : 'bg-white text-[#141414] shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                      }`}
+                    >
+                      取消
+                    </button>
                 </div>
               </motion.div>
             </div>
@@ -1898,20 +1946,24 @@ export default function App() {
                           for (let c = 0; c < 5; c++) {
                             let num = null;
                             if (c === 4) {
+                              // 第5列：49 号置顶 (R1, C5)
                               if (r === 0) num = 49;
+                              else num = null;
                             } else {
-                              num = r * 4 + c + 1;
+                              // 第1-4列：每列12个号码，排列 01-48 号
+                              num = c * 12 + r + 1;
+                              if (num > 48) num = null;
                             }
                             indices.push(num);
                           }
                         }
-                        return indices.map((num, i) => {
-                          if (num === null) return <div key={`empty-${i}`} />;
+                        return indices.map((num, idx) => {
+                          if (num === null) return <div key={`empty-${idx}`} />;
                           const amountRaw = financeBetData[num] || 0;
                           const toReportTotal = (previewReportedData[num] as number) || 0;
                           const alreadyReported = eatenAmounts[num] || 0;
                           
-                          const ballColor = getBallTextColor(num);
+                          const textColor = getBallTextColor(num);
                           const zodiac = getZodiacByNumber(num);
                           
                           // Styling logic:
@@ -1921,19 +1973,22 @@ export default function App() {
                           const isFullyReported = showEatingPreview && toReportTotal > 0 && toReportTotal <= alreadyReported;
                           
                           return (
-                            <div key={num} className="flex items-center gap-1.5 h-6">
-                              <div className="w-10 flex items-center justify-between shrink-0">
-                                <span className={`text-[13px] font-mono font-bold ${ballColor}`}>
+                            <div 
+                              key={num}
+                              className="flex items-center gap-1.5 py-1 transition-colors hover:bg-black/5 px-0.5 rounded lottery-table"
+                            >
+                              <div className="flex items-center gap-1 min-w-[42px]">
+                                <span className={`text-base font-serif font-bold ${textColor}`}>
                                   {num.toString().padStart(2, '0')}
                                 </span>
-                                <span className={`text-[11px] font-bold opacity-40 ${ballColor}`}>
+                                <span className={`text-[11pt] font-bold bg-black/5 px-1 rounded-sm ${textColor}`}>
                                   {zodiac}
                                 </span>
                               </div>
                               <div 
-                                className={`w-18 h-6 border flex items-center justify-end px-1.5 font-mono text-[11px] font-bold transition-all ${amountRaw > 0 ? (needsMoreReport ? 'bg-amber-50 border-amber-200 text-amber-700' : (isFullyReported ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-900')) : 'bg-gray-50/50 border-gray-100 text-gray-300'}`}
+                                className={`w-18 h-6 flex items-center justify-end px-1 border text-right text-[11pt] font-bold transition-all ${amountRaw > 0 ? (needsMoreReport ? 'bg-amber-50 border-amber-200 text-amber-700' : (isFullyReported ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-[#141414]')) : 'bg-gray-50/50 border-gray-100 text-gray-300'}`}
                               >
-                                {amountRaw > 0 ? amountRaw.toLocaleString() : ''}
+                                {amountRaw > 0 ? amountRaw.toFixed(0) : ''}
                               </div>
                             </div>
                           );
@@ -2127,6 +2182,7 @@ export default function App() {
                       type="text"
                       placeholder="智能识别开奖 (如: 01 02...)"
                       onKeyDown={(e) => {
+                        if (showLastUndoConfirm) return;
                         if (e.key === 'Enter') {
                           const nums = e.currentTarget.value.match(/\d+/g)?.map(Number).filter(n => n >= 1 && n <= 49) || [];
                           if (nums.length >= 7) {
@@ -2363,6 +2419,7 @@ export default function App() {
                     value={modalInputValue}
                     onChange={(e) => setModalInputValue(e.target.value)}
                     onKeyDown={(e) => {
+                      if (showLastUndoConfirm) return;
                       if (e.key === 'Enter' && e.shiftKey) {
                         e.preventDefault();
                         handleParse(false, modalInputValue);
@@ -2480,7 +2537,11 @@ export default function App() {
                     setShowLastUndoConfirm(false);
                     setUndoCallback(null);
                   }}
-                  className="flex-1 bg-red-600 text-white py-3 font-mono text-xs font-bold hover:bg-red-700 transition-colors shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
+                  className={`flex-1 border-2 border-[#141414] py-3 font-mono text-xs font-bold transition-all ${
+                    undoModalFocus === 'confirm' 
+                      ? 'bg-red-600 text-white translate-x-[1px] translate-y-[1px] shadow-none' 
+                      : 'bg-white text-[#141414] shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                  }`}
                 >
                   确认撤销
                 </button>
@@ -2489,7 +2550,11 @@ export default function App() {
                     setShowLastUndoConfirm(false);
                     setUndoCallback(null);
                   }}
-                  className="flex-1 border-2 border-[#141414] py-3 font-mono text-xs font-bold hover:bg-[#141414] hover:text-white transition-all"
+                  className={`flex-1 border-2 border-[#141414] py-3 font-mono text-xs font-bold transition-all ${
+                    undoModalFocus === 'cancel' 
+                      ? 'bg-red-600 text-white translate-x-[1px] translate-y-[1px] shadow-none' 
+                      : 'bg-white text-[#141414] shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
+                  }`}
                 >
                   取消
                 </button>
