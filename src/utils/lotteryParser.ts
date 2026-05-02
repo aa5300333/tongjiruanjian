@@ -71,7 +71,7 @@ export interface ParseResult {
 }
 
 export const STRONG_KEYWORDS = [
-  '一个字', '每个字', '各一个字', '一字', '各数', '各自', '各号', '各字', '个字', '每个', '各粒', '一个', '各', '粒', '各位', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
+  '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '各粒', '一个', '各', '粒', '各位', '个', '字', '一字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
 ];
 // 弱关键字：仅在数字 >= 50 或有币种后缀时才视为金额锚点
 export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X', '#', '＃'];
@@ -189,7 +189,7 @@ const HEADER_KEYWORDS = [
   '新澳门特', '新澳门', '澳门特码', '新奥特码', '澳门特', '澳门', '特码', '澳特', '特',
   '上报数据明细', '数据明细', '明细', '报单', '报单明细', '清单', '下注清单',
   '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报',
-  'Vz-HuiPu-PC', '图', '港', '新奥'
+  'Vz-HuiPu-PC', '图', '港'
 ];
 
 /**
@@ -219,7 +219,7 @@ export function parseInput(input: string): ParseResult[] {
     { pattern: /[波数]/g, replacement: '' },
   ];
 
-  let preProcessed = input.replace(/[元米块]/g, '$&\n'); // 核心优化：关键单位后方添加换行，强制重置识别生命周期
+  let preProcessed = input.replace(/元/g, '元\n'); // 核心优化：元字后方添加换行，强制重置识别生命周期
   RECOGNITION_LIBRARY.forEach(rec => {
     preProcessed = preProcessed.replace(rec.pattern, rec.replacement as any);
   });
@@ -230,12 +230,13 @@ export function parseInput(input: string): ParseResult[] {
   const withoutSummary = preProcessed.replace(summaryRegex, '');
   
   const sortedHeader = [...HEADER_KEYWORDS].sort((a, b) => b.length - a.length);
-  // 允许 Header 后直接跟数字或其它内容
-  const headerRegex = new RegExp(`^\\s*(?:${sortedHeader.join('|')})[：:\\s]*`, 'gm');
+  // 优化：报头后方可能紧跟数字，且不一定有冒号
+  const headerRegex = new RegExp(`^\\s*(?:${sortedHeader.join('|')})[：:\\s（）()\\x20]*`, 'gm');
   const cleaned = withoutSummary.replace(headerRegex, '');
 
   // 3. 范围处理 (e.g. 1到5各10)
-  const rangeProcessed = cleaned.replace(/(\d+)\s*(?:到|至)\s*(\d+)\s*(各|各粒|字|买|下|压)/g, (match, start, end, suffix) => {
+  // 增加对 "一字" 的支持
+  const rangeProcessed = cleaned.replace(/(\d+)\s*(?:到|至)\s*(\d+)\s*(各|各粒|字|一字|买|下|压)/g, (match, start, end, suffix) => {
     const s = parseInt(start, 10);
     const e = parseInt(end, 10);
     if (isNaN(s) || isNaN(e) || s > e || e > 49) return match;
@@ -244,7 +245,7 @@ export function parseInput(input: string): ParseResult[] {
     return nums.join(' ') + suffix;
   });
 
-  const rawChunks = rangeProcessed.split(/[\n\r;；，。]+/).map(l => l.trim()).filter(l => l);
+  const rawChunks = rangeProcessed.split(/[\n\r;；]+/).map(l => l.trim()).filter(l => l);
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
@@ -292,7 +293,7 @@ function checkHasAnchor(text: string): boolean {
 /**
  * 寻找字符串中的所有金额锚点
  */
-function findAllAnchors(text: string): { index: number, length: number, keyword: string }[] {
+function findAllAnchors(text: string): { index: number, length: number, keyword: string, hasStrongSuffix?: boolean }[] {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒#＃]*`, 'gi');
@@ -305,11 +306,12 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
   const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.[\]()【】])(\d{2,})/g;
   const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#＃\-/*@.粒米斤块位个]*$/gi;
 
-  const matches: { index: number, length: number, keyword: string }[] = [];
+  const matches: { index: number, length: number, keyword: string, hasStrongSuffix?: boolean }[] = [];
   let m;
 
   while ((m = strongRegex.exec(text)) !== null) {
-    matches.push({ index: m.index, length: m[0].length, keyword: m[1] });
+    const hasSuffix = /[元米斤块位个粒#＃]/.test(m[0]);
+    matches.push({ index: m.index, length: m[0].length, keyword: m[1], hasStrongSuffix: hasSuffix });
   }
   while ((m = weakRegex.exec(text)) !== null) {
     const keyword = m[1];
@@ -328,25 +330,25 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
       }
       if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百千万]/.test(beforeChar)) {
         // 如果前方是单纯汉字（如“特号”），视为强力金额锚点
-        matches.push({ index: m.index, length: m[0].length, keyword: '号' });
+        matches.push({ index: m.index, length: m[0].length, keyword: '号', hasStrongSuffix: hasSuffix });
         continue;
       }
     }
 
     if (val >= 50 || hasSuffix || text.substring(m.index).includes('元')) {
-      matches.push({ index: m.index, length: m[0].length, keyword: keyword || 'weak' });
+      matches.push({ index: m.index, length: m[0].length, keyword: keyword || 'weak', hasStrongSuffix: hasSuffix });
     }
   }
   while ((m = unitSuffixRegex.exec(text)) !== null) {
     // “元/米/斤/块/位/个/#”作为强力终止符，必须包含
-    matches.push({ index: m.index, length: m[0].length, keyword: m[3] });
+    matches.push({ index: m.index, length: m[0].length, keyword: m[3], hasStrongSuffix: true });
   }
   while ((m = implicitRegex.exec(text)) !== null) {
     const val = parseInt(m[1], 10);
     const beforeText = text.substring(0, m.index);
     const afterText = text.substring(m.index + m[0].length);
     const followedByForbid = /^\s*[.\d,，各号字个每打买下压xX￥=＝:：号码尾头到拖胆带中碰]/.test(afterText);
-    const followedByTarget = /^\s*[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿大小单双]/.test(afterText);
+    const followedByTarget = /^\s*[一二三四五六七八九十百马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色粒]/.test(afterText);
     const hasTargetBefore = /[^\d\s,，、；;。/*\-@.[\]()【】]/.test(beforeText);
     const hasNumberRightBefore = /[\d][\s,，、；;。/*\-@.[\]()【】]*$/.test(beforeText);
 
@@ -365,17 +367,18 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
       const rawBeforeText = text.substring(0, beforeIndex);
       const connectors = rawBeforeText.match(/[\s,，、。#\-/*@.]/g);
       
+      const hasSuffix = /[元米斤块位个粒#＃]/.test(m[0]);
+      
       // 分隔符密度检测：如果连接符在行内高频出现 (>=2次)，且当前数字属于 1-49 范围，则很大可能是数据列表而非金额
-      // 这能有效解决 02.38.40.46...21 被误识别为金额的问题
       if (connectors) {
         const lastChar = connectors[connectors.length - 1];
         const charCount = (rawBeforeText.split(lastChar).length - 1);
-        if (charCount >= 2 && val <= 49) {
+        if (charCount >= 2 && val <= 49 && !hasSuffix) {
           continue; 
         }
       }
       
-      matches.push({ index: m.index, length: m[0].length, keyword: 'EOL' });
+      matches.push({ index: m.index, length: m[0].length, keyword: 'EOL', hasStrongSuffix: hasSuffix });
     }
   }
 
@@ -404,19 +407,20 @@ function splitByAnchors(text: string): string[] {
   allMatches.sort((a, b) => a.index - b.index);
 
   // 关键优化：过滤掉“冲突锚点”
-  // 如果一个号/码/：/等弱符号后面紧跟着另一个符号（且中间没有空格等强分隔符），说明它实际上是目标分隔符而非金额锚点
-  const filteredMatches: { index: number, length: number }[] = [];
+  const filteredMatches: { index: number, length: number, keyword: string, hasStrongSuffix?: boolean }[] = [];
   for (let i = 0; i < allMatches.length; i++) {
     const m = allMatches[i];
     const nextM = allMatches[i + 1];
     
     if (nextM && (m.keyword === '号' || m.keyword === '码' || m.keyword === '/' || m.keyword === ':' || m.keyword === '：')) {
+      // 如果当前锚点已经带有强力单位后缀（如 米, 元），则它本身大概率是一个完整的下注记录，不应被跳过
+      if (m.hasStrongSuffix) {
+        filteredMatches.push(m);
+        continue;
+      }
+
       // 检查当前锚点结束到下一个锚点开始之间的文本
       const gapText = text.substring(m.index + m.length, nextM.index);
-      // 如果中间只有数字和基础分隔符（逗号、句点），且没有明显的“记录边界”（如空格），则忽略当前这个弱锚点
-      // 例如 "11号12号" -> 中间是 "12"，将被忽略
-      // 例如 "11号,12号" -> 中间是 ",12"，符合条件，也将忽略
-      // 例如 "11号30 19号" -> 中间是 "30 19"，包含空格，则保留
       if (/^[\s,，.、]*\d+[\s,，.、]*$/.test(gapText) && !gapText.includes(' ') && !gapText.includes('　')) {
         continue;
       }
@@ -581,7 +585,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
     // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色粒号]`, 'g');
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色粒]`, 'g');
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;

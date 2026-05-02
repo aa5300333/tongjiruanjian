@@ -21,7 +21,8 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
-  Trash2
+  Trash2,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import XLSX from 'xlsx-js-style';
@@ -44,8 +45,34 @@ interface BetRecord {
   rebate: number;
 }
 
+declare global {
+  interface Window {
+    electronAPI?: {
+      openEntryWindow: () => void;
+      closeEntryWindow: () => void;
+      submitEntryData: (data: any) => void;
+      onEntrySubmitted: (callback: (data: any) => void) => () => void;
+      onWindowModeInit: (callback: (mode: string) => void) => () => void;
+    };
+  }
+}
+
 export default function App() {
-  const [standaloneMode, setStandaloneMode] = useState(false);
+  const [standaloneMode, setStandaloneMode] = useState(() => {
+    // 兼容 URL 调试模式
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mode') === 'entry';
+  });
+
+  // 监听原生 Electron 模式切换指令
+  useEffect(() => {
+    if (window.electronAPI) {
+      const cleanup = window.electronAPI.onWindowModeInit((mode) => {
+        if (mode === 'entry') setStandaloneMode(true);
+      });
+      return cleanup;
+    }
+  }, []);
   
   const [financeBetData, setFinanceBetData] = useState<Record<number, number>>(() => {
     const saved = localStorage.getItem('financeBetData');
@@ -300,6 +327,19 @@ export default function App() {
     // Listener for cross-window sync
     const handleStorageSync = (e: StorageEvent) => {
       if (!e.key) return;
+      if (e.key === 'LOTTERY_EXTERNAL_SUBMIT' && e.newValue) {
+        try {
+          const syncData = JSON.parse(e.newValue);
+          // 检查时间戳防止过期数据触发
+          if (Date.now() - syncData.timestamp < 3000) {
+            handleParse(syncData.isNegative, syncData.text);
+          }
+          // 清除触发标记
+          localStorage.removeItem('LOTTERY_EXTERNAL_SUBMIT');
+        } catch (err) {
+          console.error('Sync error:', err);
+        }
+      }
       if (e.key === 'financeBetData') setFinanceBetData(JSON.parse(e.newValue || '{}'));
       if (e.key === 'eatenAmounts') setEatenAmounts(JSON.parse(e.newValue || '{}'));
       if (e.key === 'financeRecords') setFinanceRecords(JSON.parse(e.newValue || '[]'));
@@ -314,8 +354,25 @@ export default function App() {
       if (e.key === 'riskNumbers') setRiskNumbers(JSON.parse(e.newValue || '[]'));
     };
 
+    // 原生 IPC 同步监听 (Electron 模式下性能更高)
+    let ipcCleanup: (() => void) | undefined;
+    if (window.electronAPI) {
+      ipcCleanup = window.electronAPI.onEntrySubmitted((syncData: any) => {
+        handleParse(syncData.isNegative, syncData.text);
+        // 主窗口视觉反馈
+        const mainEl = document.querySelector('main');
+        if (mainEl) {
+          mainEl.classList.add('ring-4', 'ring-green-500/50');
+          setTimeout(() => mainEl.classList.remove('ring-4', 'ring-green-500/50'), 400);
+        }
+      });
+    }
+
     window.addEventListener('storage', handleStorageSync);
-    return () => window.removeEventListener('storage', handleStorageSync);
+    return () => {
+      window.removeEventListener('storage', handleStorageSync);
+      if (ipcCleanup) ipcCleanup();
+    };
   }, []);
 
   // Auto-save data to localStorage
@@ -456,140 +513,14 @@ export default function App() {
     riskInputRefs.current[lastFocusIdx]?.focus();
   };
 
-  const getRiskMatchCount = useCallback((numbers: number[]) => {
+  const getRiskMatchCount = (numbers: number[]) => {
     const riskSet = new Set(
       riskNumbers
         .map(s => parseInt(s))
         .filter(n => !isNaN(n) && n >= 1 && n <= 49)
     );
     return numbers.filter(n => riskSet.has(n)).length;
-  }, [riskNumbers]);
-
-  const formatModalResults = useCallback((input: string): { preview: React.ReactNode, rawPreview: string, total: number } => {
-    if (!input.trim()) return { preview: '等待输入...', rawPreview: '等待输入...', total: 0 };
-    try {
-      if (activeView === 'compound') {
-        const types = ['三中三', '二中二', '三中二', '特碰'];
-        const matches: { type: string, index: number }[] = [];
-        types.forEach(t => {
-          let idx = input.indexOf(t);
-          while (idx !== -1) {
-            matches.push({ type: t, index: idx });
-            idx = input.indexOf(t, idx + 1);
-          }
-        });
-        matches.sort((a, b) => a.index - b.index);
-
-        if (matches.length > 0) {
-          const segments: { type: string, content: string }[] = [];
-          for (let i = 0; i < matches.length; i++) {
-            const start = matches[i].index;
-            const end = (i + 1 < matches.length) ? matches[i+1].index : input.length;
-            segments.push({
-              type: matches[i].type,
-              content: input.substring(start + matches[i].type.length, end)
-            });
-          }
-
-          let totalBet = 0;
-          let previewLines: React.ReactNode[] = [];
-          let rawPreviewArr: string[] = [];
-          let hasValidBlock = false;
-
-          segments.forEach((seg, idx) => {
-            const amountMatch = seg.content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
-                                seg.content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
-            
-            let amountPerGroup = 0;
-            let contentToProcess = seg.content;
-
-            if (amountMatch) {
-              amountPerGroup = parseFloat(amountMatch[1]);
-              contentToProcess = seg.content.replace(amountMatch[0], '');
-            } else {
-              for (let j = idx + 1; j < segments.length; j++) {
-                const nextAmountMatch = segments[j].content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
-                                        segments[j].content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
-                if (nextAmountMatch) {
-                  amountPerGroup = parseFloat(nextAmountMatch[1]);
-                  break;
-                }
-              }
-            }
-
-            if (amountPerGroup > 0) {
-              hasValidBlock = true;
-              const type = seg.type;
-              let k = 0;
-              if (type === '三中三' || type === '三中二') k = 3;
-              else if (type === '二中二') k = 2;
-              else if (type === '特碰') k = 1;
-
-              const lines = contentToProcess.split(/\n/);
-              lines.forEach((line, lIdx) => {
-                const numbers = Array.from(new Set(
-                  (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
-                ));
-
-                if (type === '特碰') {
-                  if (numbers.length >= 2) {
-                    const count = getCombinations(numbers, 2).length;
-                    const blockTotal = count * amountPerGroup;
-                    totalBet += blockTotal;
-                    const lineText = `${numbers.map(n => n.toString().padStart(2, '0')).join(' ')} 特碰 各${amountPerGroup}（合计：${blockTotal}）`;
-                    previewLines.push(<div key={`seg-${idx}-line-${lIdx}`} className="text-gray-800">{lineText}</div>);
-                    rawPreviewArr.push(lineText);
-                  }
-                } else if (numbers.length >= k) {
-                  const count = getCombinations(numbers, k).length;
-                  const blockTotal = count * amountPerGroup;
-                  totalBet += blockTotal;
-                  const lineText = `${numbers.map(n => n.toString().padStart(2, '0')).join(' ')} ${type} 各${amountPerGroup}（合计：${blockTotal}）`;
-                  previewLines.push(<div key={`seg-${idx}-line-${lIdx}`} className="text-gray-800">{lineText}</div>);
-                  rawPreviewArr.push(lineText);
-                }
-              });
-            }
-          });
-
-          if (hasValidBlock) {
-            return {
-              preview: <div className="space-y-1">{previewLines}</div>,
-              rawPreview: rawPreviewArr.join('\n'),
-              total: totalBet
-            };
-          }
-        }
-        return { preview: '等待识别玩法 (如：三中三)...', rawPreview: '', total: 0 };
-      } else {
-        const results = parseInput(input);
-        if (results.length === 0) return { preview: '未识别到有效格式', rawPreview: '', total: 0 };
-
-        let total = 0;
-        const preview = (
-          <div className="space-y-1">
-            {results.map((res, idx) => {
-              const subtotal = res.amount * res.numbers.length;
-              total += subtotal;
-              const matchCount = getRiskMatchCount(res.numbers);
-              return (
-                <div key={idx} className="flex flex-wrap items-center gap-1">
-                  <span className={matchCount > 0 ? 'text-red-600 font-bold' : 'text-gray-800'}>
-                    {res.raw}
-                  </span>
-                  <span className="text-gray-400">（合计：{subtotal}）</span>
-                </div>
-              );
-            })}
-          </div>
-        );
-        const rawPreview = results.map(res => `${res.raw}（合计：${res.amount * res.numbers.length}）`).join('\n');
-        return { preview, rawPreview, total };
-      }
-    } catch (e) {
-      return { preview: '格式解析异常', rawPreview: '', total: 0 };
-    }
-  }, [activeView, getRiskMatchCount]);
+  };
 
   const handleEatCodes = () => {
     const nextReported = { ...previewReportedData } as Record<number, number>;
@@ -675,9 +606,30 @@ export default function App() {
     return results;
   };
 
-  const handleParse = useCallback((isNegative: boolean = false, customInput?: string) => {
+  const handleParse = (isNegative: boolean = false, customInput?: string) => {
     const inputToParse = customInput !== undefined ? customInput : modalInputValue;
     if (!inputToParse.trim()) return;
+
+    if (standaloneMode) {
+      const syncData = {
+        text: inputToParse,
+        isNegative,
+        timestamp: Date.now()
+      };
+      
+      if (window.electronAPI) {
+        // 原生高速 IPC 提交
+        window.electronAPI.submitEntryData(syncData);
+        // 主进程会自动 hide 窗口
+      } else {
+        // 浏览器 localStorage 回退模式
+        localStorage.setItem('LOTTERY_EXTERNAL_SUBMIT', JSON.stringify(syncData));
+      }
+      
+      setLastSubmittedModalValue(inputToParse);
+      setModalInputValue('');
+      return;
+    }
 
     try {
       const items: BetItem[] = [];
@@ -827,36 +779,10 @@ export default function App() {
       setLastSubmittedModalValue(inputToParse);
       setError(null);
       modalInputRef.current?.focus();
-
-      // If in standalone window (Detached mode), broadcast the action back to main window (IPC Simulation)
-      if (standaloneMode) {
-        const channel = new BroadcastChannel('electron_ipc_simulation');
-        channel.postMessage({ type: 'SYNC_INPUT_SAVE', payload: { isNegative, input: inputToParse } });
-        channel.close();
-      }
     } catch (err) {
       setError('解析出错，请重试');
     }
-  }, [modalInputValue, activeView, financeBetData, rebate, standaloneMode, financeRecords, compoundRecords, formatModalResults, getRiskMatchCount, setError]);
-
-  // Use a ref to capture handleParse for the IPC listener to prevent effect thrashing
-  const handleParseRef = useRef(handleParse);
-  useEffect(() => {
-    handleParseRef.current = handleParse;
-  }, [handleParse]);
-
-  // Cross-window sync listener for Electron-like IPC
-  useEffect(() => {
-    const channel = new BroadcastChannel('electron_ipc_simulation');
-    channel.onmessage = (event) => {
-      const { type, payload } = event.data;
-      if (type === 'SYNC_INPUT_SAVE' && !standaloneMode) {
-        // Main window receives the save action from detached window
-        handleParseRef.current(payload.isNegative, payload.input);
-      }
-    };
-    return () => channel.close();
-  }, [standaloneMode]);
+  };
 
   const handlePasteAndRecognize = async () => {
     setError(null);
@@ -948,22 +874,30 @@ export default function App() {
   };
 
   const handlePopOut = () => {
-    const width = 580;
-    const height = 700;
-    const left = window.screen.width - width - 100;
-    const top = 100;
+    const width = 600;
+    const height = 800;
     
-    // Open a truly standalone window
+    // 强制使用系统独立窗口弹出
+    if (window.opener || window.name === 'EntryAssistant') {
+      // 已经是独立窗口了，不进行嵌套弹出
+      return;
+    }
+
     const newWin = window.open(
       window.location.origin + window.location.pathname + '?mode=entry',
       'EntryAssistant',
-      `width=${width},height=${height},left=${left},top=${top},menubar=no,status=no,location=no,toolbar=no`
+      `width=${width},height=${height},resizable=yes,scrollbars=yes,status=no,location=no`
     );
     
     if (newWin) {
       setIsModalOpen(false);
+      // 尝试聚焦
+      newWin.focus();
     } else {
-      setError('弹出窗口被浏览器拦截，请在浏览器地址栏右侧允许弹出窗口。');
+      // 降级使用内部弹窗 (仅在浏览器拦截时)
+      setIsModalOpen(true);
+      setError('窗口弹出被拦截，已为您切换到内部模式。');
+      setTimeout(() => setError(null), 3000);
     }
   };
 
@@ -1170,6 +1104,7 @@ export default function App() {
           ws[cellE].s.alignment.horizontal = "center";
         }
       });
+
       // Set column widths
       ws['!cols'] = [
         { wch: 30 }, // Column A (Original Data)
@@ -1227,157 +1162,226 @@ export default function App() {
     });
   };
 
+  const formatModalResults = (input: string): { preview: React.ReactNode, rawPreview: string, total: number } => {
+    if (!input.trim()) return { preview: '等待输入...', rawPreview: '等待输入...', total: 0 };
+    try {
+      if (activeView === 'compound') {
+        const types = ['三中三', '二中二', '三中二', '特碰'];
+        const matches: { type: string, index: number }[] = [];
+        types.forEach(t => {
+          let idx = input.indexOf(t);
+          while (idx !== -1) {
+            matches.push({ type: t, index: idx });
+            idx = input.indexOf(t, idx + 1);
+          }
+        });
+        matches.sort((a, b) => a.index - b.index);
+
+        if (matches.length > 0) {
+          const segments: { type: string, content: string }[] = [];
+          for (let i = 0; i < matches.length; i++) {
+            const start = matches[i].index;
+            const end = (i + 1 < matches.length) ? matches[i+1].index : input.length;
+            segments.push({
+              type: matches[i].type,
+              content: input.substring(start + matches[i].type.length, end)
+            });
+          }
+
+          let totalBet = 0;
+          let previewLines: React.ReactNode[] = [];
+          let rawPreview = '';
+          let hasValidBlock = false;
+
+          segments.forEach((seg, idx) => {
+            const amountMatch = seg.content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
+                                seg.content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
+            
+            let amountPerGroup = 0;
+            let contentToProcess = seg.content;
+
+            if (amountMatch) {
+              amountPerGroup = parseFloat(amountMatch[1]);
+              contentToProcess = seg.content.replace(amountMatch[0], '');
+            } else {
+              for (let j = idx + 1; j < segments.length; j++) {
+                const nextAmountMatch = segments[j].content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
+                                        segments[j].content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
+                if (nextAmountMatch) {
+                  amountPerGroup = parseFloat(nextAmountMatch[1]);
+                  break;
+                }
+              }
+            }
+
+            if (amountPerGroup > 0) {
+              const type = seg.type;
+              let k = 0;
+              if (type === '三中三' || type === '三中二') k = 3;
+              else if (type === '二中二') k = 2;
+              else if (type === '特碰') k = 1;
+
+              const lines = contentToProcess.split(/\n/);
+              let segmentCount = 0;
+              let segmentNumbers: string[] = [];
+
+              lines.forEach(line => {
+                const numbers = Array.from(new Set(
+                  (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
+                ));
+
+                if (numbers.length > 0) {
+                  let count = 0;
+                  if (type === '特碰' && numbers.length >= 2) {
+                    count = getCombinations(numbers, 2).length;
+                  } else if (numbers.length >= k) {
+                    count = getCombinations(numbers, k).length;
+                  }
+                  
+                  if (count > 0) {
+                    hasValidBlock = true;
+                    segmentCount += count;
+                    segmentNumbers.push(numbers.map(n => n.toString().padStart(2, '0')).join(' '));
+                  }
+                }
+              });
+
+                if (segmentCount > 0) {
+                  const subTotal = segmentCount * amountPerGroup;
+                  totalBet += subTotal;
+                  const lineText = `${type}: ${segmentNumbers.join(' | ')} 各${amountPerGroup}（合计：${subTotal}）`;
+                  rawPreview += lineText + '\n';
+                  // Check risk for compound segments (flattened numbers across all lines in segment)
+                  const allNumbersInSegment = contentToProcess.split(/\n/).flatMap(line => 
+                    (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
+                  );
+                  const matchCount = getRiskMatchCount(allNumbersInSegment);
+                  const isHighRisk = matchCount >= 8;
+                  previewLines.push(<div key={idx} className={isHighRisk ? "text-red-600 font-bold" : ""}>{renderHighlightedText(lineText)}</div>);
+                }
+            }
+          });
+
+          if (hasValidBlock) {
+            return { preview: <>{previewLines}</>, rawPreview: rawPreview.trim(), total: totalBet };
+          }
+        }
+        return { preview: '格式错误，未识别到玩法或金额。格式如："二中二 05-19 10"', rawPreview: '格式错误', total: 0 };
+      }
+
+      const results = parseInput(input);
+      if (results.length === 0) return { preview: '无法解析，请检查格式', rawPreview: '无法解析', total: 0 };
+      
+      let grandTotal = 0;
+      const rawLines: string[] = [];
+      const previewLines: React.ReactNode[] = [];
+
+      results.forEach((res, idx) => {
+        const count = res.numbers.length;
+        const total = count * res.amount;
+        grandTotal += total;
+        const lineText = `${res.raw} 各${res.amount}（合计：${total}）`;
+        rawLines.push(lineText);
+
+        const matchCount = getRiskMatchCount(res.numbers);
+        const isRiskHigh = matchCount >= 8;
+
+        // 检测是否有大于 49 的数字
+        const hasInvalid = /\d+/.test(res.raw) && (res.raw.match(/\d+/g) || []).some(n => parseInt(n) > 49);
+
+        previewLines.push(
+          <div key={idx} className={`${hasInvalid ? "bg-red-50" : ""} ${isRiskHigh ? "text-red-600 font-bold" : ""}`}>
+            {renderHighlightedText(res.raw)}
+            <span className="opacity-70"> 各{res.amount}（合计：{total}）</span>
+          </div>
+        );
+      });
+
+      return { preview: <>{previewLines}</>, rawPreview: rawLines.join('\n'), total: grandTotal };
+    } catch (e) {
+      return { preview: '解析错误', rawPreview: '解析错误', total: 0 };
+    }
+  };
+
   if (standaloneMode) {
+    const { preview, total } = formatModalResults(modalInputValue);
     return (
-      <div className="fixed inset-0 bg-[#F2F1ED] flex flex-col font-sans tracking-tight overflow-hidden">
-        {/* Fake Desktop Title Bar */}
-        <div className="bg-[#141414] text-[#E4E3E0] px-4 py-2 flex items-center justify-between select-none">
+      <div className="fixed inset-0 bg-[#F2F1ED] flex flex-col font-sans tracking-tight overflow-hidden border-2 border-[#141414] shadow-2xl">
+        {/* 原生拖拽标题栏 */}
+        <div 
+          className="h-10 flex items-center justify-between px-4 bg-[#141414] text-white cursor-move select-none shrink-0"
+          style={{ WebkitAppRegion: 'drag' } as any}
+        >
           <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />
-            <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full" />
-            <div className="w-2.5 h-2.5 bg-green-500 rounded-full" />
-            <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] ml-2">
-              {modalMode === 'deduct' ? '智能扣除助手 (DETACHED)' : '智能录入助手 (DETACHED)'}
-            </h3>
+            <Calculator size={14} />
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#E4E3E0]">智能录入助手 (原生模式)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] font-mono opacity-50 uppercase bg-blue-600/20 text-blue-400 px-1 border border-blue-500/30">Sync Active</span>
-          </div>
+          <button 
+            onClick={() => window.electronAPI?.closeEntryWindow()}
+            style={{ WebkitAppRegion: 'no-drag' } as any}
+            className="hover:bg-red-600 p-1.5 rounded-sm transition-colors text-white"
+          >
+            <X size={16} />
+          </button>
         </div>
 
-        <div className="flex-1 flex flex-col gap-4 p-6 min-h-0 overflow-hidden">
-          <div className="flex-1 flex flex-col space-y-2 min-h-0">
-            <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字 (数据将自动同步至主窗口):</label>
-            <textarea
-              ref={modalInputRef}
+        <div className="flex-1 p-6 flex flex-col gap-4 overflow-hidden">
+          <div className="flex flex-col gap-1">
+             <label className="text-[10px] font-mono font-bold uppercase text-gray-500">快速录入 (回车入账)</label>
+             <textarea 
               autoFocus
+              ref={modalInputRef}
               value={modalInputValue}
               onChange={(e) => setModalInputValue(e.target.value)}
               onKeyDown={(e) => {
-                if (showLastUndoConfirm) return;
-                if (e.key === 'Enter' && e.shiftKey) {
-                  e.preventDefault();
-                  handleParse(false, modalInputValue);
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                   handleParse(modalMode === 'deduct', modalInputValue);
+                   setModalInputValue('');
                 }
               }}
-              placeholder="在此输入内容..."
-              className="w-full flex-1 p-4 font-mono text-base border-2 border-gray-400 focus:outline-none focus:border-[#141414] bg-white resize-none shadow-inner"
+              placeholder="请输入内容..."
+              className="w-full h-32 p-3 bg-white border-2 border-[#141414] font-mono text-sm resize-none focus:outline-none"
             />
           </div>
 
-          <div className="flex-1 min-h-0 flex flex-col space-y-2">
-            <div className="flex justify-between items-end">
-              <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别预览:</label>
-              {modalInputValue.trim() && (
-                <div className="flex flex-col items-end">
-                  <span className="text-2xl font-mono font-bold text-blue-600 leading-none">
-                    ¥{formatModalResults(modalInputValue).total.toLocaleString()}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div 
-              ref={standalonePreviewScrollRef}
-              className="flex-1 w-full p-4 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner border-dashed"
-            >
-              {formatModalResults(modalInputValue).preview}
-            </div>
+          <div className="flex-1 border-2 border-[#141414] bg-[#EBEAE6] p-4 flex flex-col overflow-hidden">
+             <div className="flex items-center justify-between mb-2">
+               <span className="text-[10px] font-mono font-bold uppercase opacity-50">数据识别</span>
+               <div className="text-xl font-mono font-bold">¥ {total.toLocaleString()}</div>
+             </div>
+             <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed">
+               {preview}
+             </div>
           </div>
 
-          {error && (
-            <div className="bg-red-50 border-l-4 border-red-500 p-2 text-xs text-red-700 font-mono animate-pulse">
-              {error}
-            </div>
-          )}
-
-          <div className="grid grid-cols-5 gap-1 pt-2">
-            <button onClick={handlePasteAndRecognize} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">粘贴识别</button>
+          <div className="flex gap-2">
             <button 
               onClick={() => {
-                modalInputRef.current?.focus();
-                setLastSubmittedModalValue('');
-              }} 
-              className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap"
-            >
-              重新识别
-            </button>
-            <button onClick={() => setModalInputValue('')} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">清空</button>
-            <button onClick={triggerLastUndo} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">撤销</button>
-            <button onClick={triggerClearAndPaste} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap text-red-600">清空数据并粘贴</button>
-          </div>
-          
-          <div className="grid grid-cols-5 gap-1 mt-1">
-            <button 
-              onClick={() => handleParse(false, modalInputValue)} 
-              disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue} 
-              className="col-span-4 bg-[#141414] hover:bg-[#2a2a2a] text-white py-4 text-sm font-bold transition-all flex items-center justify-center gap-2 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
+                handleParse(false, modalInputValue);
+                setModalInputValue('');
+              }}
+              className="flex-1 bg-[#141414] text-white py-4 font-mono font-bold hover:bg-black transition-all flex items-center justify-center gap-2"
             >
               <Plus size={18} />
-              保存下单
+              确认入账 (Ctrl+Enter)
             </button>
             <button 
-              onClick={() => handleParse(true, modalInputValue)} 
-              disabled={!modalInputValue.trim() || modalInputValue === lastSubmittedModalValue} 
-              className="col-span-1 bg-red-600 hover:bg-red-700 text-white py-4 text-xs font-bold transition-all flex items-center justify-center gap-1 mt-1 disabled:opacity-50 disabled:bg-gray-400 disabled:grayscale"
+              onClick={() => {
+                handleParse(true, modalInputValue);
+                setModalInputValue('');
+              }}
+              className="w-16 bg-red-600 text-white py-4 font-mono font-bold hover:bg-red-700 transition-all flex items-center justify-center"
             >
-              <Minus size={14} />
-              扣除
+              <Minus size={18} />
             </button>
           </div>
         </div>
-
-        {/* Standalone Undo Confirm */}
-        <AnimatePresence>
-          {showLastUndoConfirm && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px]">
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-white border-4 border-[#141414] p-6 max-w-xs w-full shadow-2xl"
-              >
-                <h3 className="text-lg font-serif italic font-bold mb-4">操作确认</h3>
-                <div className="bg-gray-100 p-2 border-l-4 border-red-600 mb-4">
-                  <span className="text-xs font-mono font-bold text-red-600 break-words">{undoCallback?.label}</span>
-                </div>
-                <div className="flex gap-2">
-                    <button 
-                      onClick={() => {
-                        undoCallback?.fn();
-                        setShowLastUndoConfirm(false);
-                        setUndoCallback(null);
-                      }}
-                      className={`flex-1 border-2 border-[#141414] py-2 font-mono text-[10px] font-bold transition-all ${
-                        undoModalFocus === 'confirm' 
-                          ? 'bg-red-600 text-white translate-x-[1px] translate-y-[1px] shadow-none' 
-                          : 'bg-white text-[#141414] shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
-                      }`}
-                    >
-                      确认撤销
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setShowLastUndoConfirm(false);
-                        setUndoCallback(null);
-                      }}
-                      className={`flex-1 border-2 border-[#141414] py-2 font-mono text-[10px] font-bold transition-all ${
-                        undoModalFocus === 'cancel' 
-                          ? 'bg-red-600 text-white translate-x-[1px] translate-y-[1px] shadow-none' 
-                          : 'bg-white text-[#141414] shadow-[3px_3px_0px_0px_rgba(0,0,0,1)]'
-                      }`}
-                    >
-                      取消
-                    </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
       </div>
     );
   }
 
   return (
+
     <div className="h-screen w-screen bg-gray-100 flex justify-center overflow-hidden relative">
       {/* App Container with fixed width but full height */}
       <div 
@@ -1769,25 +1773,18 @@ export default function App() {
                       <h2 className="text-xs font-mono font-bold uppercase tracking-widest">智能录入系统</h2>
                     </div>
                     <button 
-                      onClick={() => {
-                        window.open(
-                          window.location.origin + window.location.pathname + '?mode=entry',
-                          'InputWindow',
-                          'width=700,height=850,menubar=no,toolbar=no,location=no,status=no,alwaysOnTop=yes'
-                        );
-                      }}
+                      onClick={handlePopOut}
                       className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[10px] font-bold hover:bg-blue-100 transition-colors"
-                      title="打开独立工作窗口 (仿真 Electron)"
+                      title="打开悬浮录入助手"
                     >
-                      🚀 独立窗口
+                      🚀 录入助手
                     </button>
                   </div>
                   
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={() => {
-                        setModalMode('save');
-                        setIsModalOpen(true);
+                        handlePopOut();
                       }}
                       className="w-full text-[#E4E3E0] py-4 font-mono text-base font-bold hover:bg-opacity-90 transition-all active:translate-y-1 flex items-center justify-center gap-2 bg-[#141414]"
                     >
@@ -2236,7 +2233,7 @@ export default function App() {
                     <div className="flex flex-col gap-2">
                        <button
                         onClick={() => {
-                          setIsModalOpen(true);
+                          handlePopOut();
                         }}
                         className="w-full bg-indigo-600 text-white py-5 font-mono text-base font-bold hover:bg-indigo-700 transition-all active:translate-y-1 flex items-center justify-center gap-2"
                       >
@@ -2397,52 +2394,53 @@ export default function App() {
         </div>
       </main>
 
-      {/* Data Entry Modal (Floating Window System) */}
+      {/* Data Entry Modal */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 pointer-events-none flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 pointer-events-none">
             <motion.div 
               drag
               dragControls={dragControls}
               dragListener={false}
               dragMomentum={false}
-              dragConstraints={false}
-              initial={{ scale: 0.95, opacity: 0, y: 30 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 30 }}
-              style={{ width: '680px', height: '700px', minWidth: '450px', minHeight: '550px' }}
-              className="pointer-events-auto bg-[#F2F1ED] border-2 border-[#141414] flex flex-col shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] resize overflow-hidden"
+              initial={{ x: 'calc(50vw - 325px)', y: 'calc(50vh - 340px)', opacity: 0 }}
+              animate={{ x: 'calc(50vw - 325px)', y: 'calc(50vh - 340px)', opacity: 1 }}
+              exit={{ opacity: 0 }}
+              style={{ width: '650px', height: '680px', minWidth: '450px', minHeight: '550px' }}
+              className="bg-[#F2F1ED] border-4 border-[#141414] p-6 flex flex-col gap-4 shadow-2xl resize overflow-hidden pointer-events-auto absolute"
             >
-              {/* Window Title Bar */}
               <div 
                 onPointerDown={(e) => dragControls.start(e)}
-                className="bg-[#141414] text-[#E4E3E0] px-4 py-2 flex items-center justify-between cursor-move select-none"
+                className="flex items-center justify-between border-b border-[#141414] pb-2 cursor-move select-none"
               >
                 <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />
-                  <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full" />
-                  <div className="w-2.5 h-2.5 bg-green-500 rounded-full" />
-                  <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] ml-2">
-                    {modalMode === 'deduct' ? '智能扣除助手 (DEDUCT_MODE)' : '智能录入助手 (SYSTEM_V2)'}
+                  <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest pointer-events-none">
+                    智能下注录入
                   </h3>
+                  <button 
+                    onClick={handlePopOut}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="flex items-center gap-1 px-1.5 py-0.5 bg-white border border-gray-300 rounded text-[9px] font-bold hover:bg-gray-50 transition-colors"
+                    title="在独立窗口中打开"
+                  >
+                    <ExternalLink size={10} />
+                    窗口独立
+                  </button>
                 </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-[9px] font-mono opacity-50 uppercase">Always on top</span>
                   <button 
                     onClick={() => setIsModalOpen(false)}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className="text-xs font-mono hover:text-white transition-colors"
+                    className="text-xs font-mono hover:underline"
                   >
                     [关闭]
                   </button>
-                </div>
               </div>
 
-              <div className="flex-1 flex flex-col gap-4 p-6 min-h-0">
+              <div className="flex-1 flex flex-col gap-4 min-h-0">
                 {/* Top Window: Input */}
-                <div className="flex-1 flex flex-col space-y-2 min-h-0">
+                <div className="flex-1 flex flex-col space-y-1 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字 (SHIFT + ENTER 保存):</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字:</label>
                   </div>
                   <textarea
                     ref={modalInputRef}
@@ -2456,27 +2454,23 @@ export default function App() {
                         handleParse(false, modalInputValue);
                       }
                     }}
-                    className="w-full flex-1 p-4 font-mono text-base border-2 border-gray-400 focus:outline-none focus:border-[#141414] bg-white resize-none shadow-inner rounded-none transition-colors"
-                    placeholder="在此输入或粘贴内容..."
+                    className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 focus:outline-none bg-white resize-none shadow-inner rounded-none"
                   />
                 </div>
 
                 {/* Bottom Window: Display */}
-                <div className="flex-1 flex flex-col space-y-2 min-h-0">
+                <div className="flex-1 flex flex-col space-y-1 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">实时识别预览:</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别的结果:</label>
                     {modalInputValue.trim() && (
-                      <div className="flex flex-col items-end">
-                        <span className="text-2xl font-mono font-bold text-blue-600 leading-none">
-                          ¥{formatModalResults(modalInputValue).total.toLocaleString()}
-                        </span>
-                        <span className="text-[9px] font-mono uppercase opacity-40">Estimated Total</span>
-                      </div>
+                      <span className="text-xl font-mono font-bold text-blue-600">
+                        估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
+                      </span>
                     )}
                   </div>
                   <div 
                     ref={previewScrollRef}
-                    className="w-full flex-1 p-4 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner border-dashed"
+                    className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner"
                   >
                     {formatModalResults(modalInputValue).preview}
                   </div>
@@ -2946,22 +2940,4 @@ function getBallColor(num: number): string {
   if (blue.includes(num)) return 'bg-blue-500 text-white border-blue-500';
   if (green.includes(num)) return 'bg-green-500 text-white border-green-500';
   return '';
-}
-
-// Helper: Get combinations of k items from array
-function getCombinations<T>(array: T[], k: number): T[][] {
-  const result: T[][] = [];
-  function backtrack(start: number, current: T[]) {
-    if (current.length === k) {
-      result.push([...current]);
-      return;
-    }
-    for (let i = start; i < array.length; i++) {
-       current.push(array[i]);
-       backtrack(i + 1, current);
-       current.pop();
-    }
-  }
-  backtrack(0, []);
-  return result;
 }
