@@ -456,14 +456,140 @@ export default function App() {
     riskInputRefs.current[lastFocusIdx]?.focus();
   };
 
-  const getRiskMatchCount = (numbers: number[]) => {
+  const getRiskMatchCount = useCallback((numbers: number[]) => {
     const riskSet = new Set(
       riskNumbers
         .map(s => parseInt(s))
         .filter(n => !isNaN(n) && n >= 1 && n <= 49)
     );
     return numbers.filter(n => riskSet.has(n)).length;
-  };
+  }, [riskNumbers]);
+
+  const formatModalResults = useCallback((input: string): { preview: React.ReactNode, rawPreview: string, total: number } => {
+    if (!input.trim()) return { preview: '等待输入...', rawPreview: '等待输入...', total: 0 };
+    try {
+      if (activeView === 'compound') {
+        const types = ['三中三', '二中二', '三中二', '特碰'];
+        const matches: { type: string, index: number }[] = [];
+        types.forEach(t => {
+          let idx = input.indexOf(t);
+          while (idx !== -1) {
+            matches.push({ type: t, index: idx });
+            idx = input.indexOf(t, idx + 1);
+          }
+        });
+        matches.sort((a, b) => a.index - b.index);
+
+        if (matches.length > 0) {
+          const segments: { type: string, content: string }[] = [];
+          for (let i = 0; i < matches.length; i++) {
+            const start = matches[i].index;
+            const end = (i + 1 < matches.length) ? matches[i+1].index : input.length;
+            segments.push({
+              type: matches[i].type,
+              content: input.substring(start + matches[i].type.length, end)
+            });
+          }
+
+          let totalBet = 0;
+          let previewLines: React.ReactNode[] = [];
+          let rawPreviewArr: string[] = [];
+          let hasValidBlock = false;
+
+          segments.forEach((seg, idx) => {
+            const amountMatch = seg.content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
+                                seg.content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
+            
+            let amountPerGroup = 0;
+            let contentToProcess = seg.content;
+
+            if (amountMatch) {
+              amountPerGroup = parseFloat(amountMatch[1]);
+              contentToProcess = seg.content.replace(amountMatch[0], '');
+            } else {
+              for (let j = idx + 1; j < segments.length; j++) {
+                const nextAmountMatch = segments[j].content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
+                                        segments[j].content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
+                if (nextAmountMatch) {
+                  amountPerGroup = parseFloat(nextAmountMatch[1]);
+                  break;
+                }
+              }
+            }
+
+            if (amountPerGroup > 0) {
+              hasValidBlock = true;
+              const type = seg.type;
+              let k = 0;
+              if (type === '三中三' || type === '三中二') k = 3;
+              else if (type === '二中二') k = 2;
+              else if (type === '特碰') k = 1;
+
+              const lines = contentToProcess.split(/\n/);
+              lines.forEach((line, lIdx) => {
+                const numbers = Array.from(new Set(
+                  (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
+                ));
+
+                if (type === '特碰') {
+                  if (numbers.length >= 2) {
+                    const count = getCombinations(numbers, 2).length;
+                    const blockTotal = count * amountPerGroup;
+                    totalBet += blockTotal;
+                    const lineText = `${numbers.map(n => n.toString().padStart(2, '0')).join(' ')} 特碰 各${amountPerGroup}（合计：${blockTotal}）`;
+                    previewLines.push(<div key={`seg-${idx}-line-${lIdx}`} className="text-gray-800">{lineText}</div>);
+                    rawPreviewArr.push(lineText);
+                  }
+                } else if (numbers.length >= k) {
+                  const count = getCombinations(numbers, k).length;
+                  const blockTotal = count * amountPerGroup;
+                  totalBet += blockTotal;
+                  const lineText = `${numbers.map(n => n.toString().padStart(2, '0')).join(' ')} ${type} 各${amountPerGroup}（合计：${blockTotal}）`;
+                  previewLines.push(<div key={`seg-${idx}-line-${lIdx}`} className="text-gray-800">{lineText}</div>);
+                  rawPreviewArr.push(lineText);
+                }
+              });
+            }
+          });
+
+          if (hasValidBlock) {
+            return {
+              preview: <div className="space-y-1">{previewLines}</div>,
+              rawPreview: rawPreviewArr.join('\n'),
+              total: totalBet
+            };
+          }
+        }
+        return { preview: '等待识别玩法 (如：三中三)...', rawPreview: '', total: 0 };
+      } else {
+        const results = parseInput(input);
+        if (results.length === 0) return { preview: '未识别到有效格式', rawPreview: '', total: 0 };
+
+        let total = 0;
+        const preview = (
+          <div className="space-y-1">
+            {results.map((res, idx) => {
+              const subtotal = res.amount * res.numbers.length;
+              total += subtotal;
+              const matchCount = getRiskMatchCount(res.numbers);
+              return (
+                <div key={idx} className="flex flex-wrap items-center gap-1">
+                  <span className={matchCount > 0 ? 'text-red-600 font-bold' : 'text-gray-800'}>
+                    {res.raw}
+                  </span>
+                  <span className="text-gray-400">（合计：{subtotal}）</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+        const rawPreview = results.map(res => `${res.raw}（合计：${res.amount * res.numbers.length}）`).join('\n');
+        return { preview, rawPreview, total };
+      }
+    } catch (e) {
+      return { preview: '格式解析异常', rawPreview: '', total: 0 };
+    }
+  }, [activeView, getRiskMatchCount]);
 
   const handleEatCodes = () => {
     const nextReported = { ...previewReportedData } as Record<number, number>;
@@ -549,7 +675,7 @@ export default function App() {
     return results;
   };
 
-  const handleParse = (isNegative: boolean = false, customInput?: string) => {
+  const handleParse = useCallback((isNegative: boolean = false, customInput?: string) => {
     const inputToParse = customInput !== undefined ? customInput : modalInputValue;
     if (!inputToParse.trim()) return;
 
@@ -701,10 +827,36 @@ export default function App() {
       setLastSubmittedModalValue(inputToParse);
       setError(null);
       modalInputRef.current?.focus();
+
+      // If in standalone window (Detached mode), broadcast the action back to main window (IPC Simulation)
+      if (standaloneMode) {
+        const channel = new BroadcastChannel('electron_ipc_simulation');
+        channel.postMessage({ type: 'SYNC_INPUT_SAVE', payload: { isNegative, input: inputToParse } });
+        channel.close();
+      }
     } catch (err) {
       setError('解析出错，请重试');
     }
-  };
+  }, [modalInputValue, activeView, financeBetData, rebate, standaloneMode, financeRecords, compoundRecords, formatModalResults, getRiskMatchCount, setError]);
+
+  // Use a ref to capture handleParse for the IPC listener to prevent effect thrashing
+  const handleParseRef = useRef(handleParse);
+  useEffect(() => {
+    handleParseRef.current = handleParse;
+  }, [handleParse]);
+
+  // Cross-window sync listener for Electron-like IPC
+  useEffect(() => {
+    const channel = new BroadcastChannel('electron_ipc_simulation');
+    channel.onmessage = (event) => {
+      const { type, payload } = event.data;
+      if (type === 'SYNC_INPUT_SAVE' && !standaloneMode) {
+        // Main window receives the save action from detached window
+        handleParseRef.current(payload.isNegative, payload.input);
+      }
+    };
+    return () => channel.close();
+  }, [standaloneMode]);
 
   const handlePasteAndRecognize = async () => {
     setError(null);
@@ -1018,7 +1170,6 @@ export default function App() {
           ws[cellE].s.alignment.horizontal = "center";
         }
       });
-
       // Set column widths
       ws['!cols'] = [
         { wch: 30 }, // Column A (Original Data)
@@ -1076,165 +1227,27 @@ export default function App() {
     });
   };
 
-  const formatModalResults = (input: string): { preview: React.ReactNode, rawPreview: string, total: number } => {
-    if (!input.trim()) return { preview: '等待输入...', rawPreview: '等待输入...', total: 0 };
-    try {
-      if (activeView === 'compound') {
-        const types = ['三中三', '二中二', '三中二', '特碰'];
-        const matches: { type: string, index: number }[] = [];
-        types.forEach(t => {
-          let idx = input.indexOf(t);
-          while (idx !== -1) {
-            matches.push({ type: t, index: idx });
-            idx = input.indexOf(t, idx + 1);
-          }
-        });
-        matches.sort((a, b) => a.index - b.index);
-
-        if (matches.length > 0) {
-          const segments: { type: string, content: string }[] = [];
-          for (let i = 0; i < matches.length; i++) {
-            const start = matches[i].index;
-            const end = (i + 1 < matches.length) ? matches[i+1].index : input.length;
-            segments.push({
-              type: matches[i].type,
-              content: input.substring(start + matches[i].type.length, end)
-            });
-          }
-
-          let totalBet = 0;
-          let previewLines: React.ReactNode[] = [];
-          let rawPreview = '';
-          let hasValidBlock = false;
-
-          segments.forEach((seg, idx) => {
-            const amountMatch = seg.content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
-                                seg.content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
-            
-            let amountPerGroup = 0;
-            let contentToProcess = seg.content;
-
-            if (amountMatch) {
-              amountPerGroup = parseFloat(amountMatch[1]);
-              contentToProcess = seg.content.replace(amountMatch[0], '');
-            } else {
-              for (let j = idx + 1; j < segments.length; j++) {
-                const nextAmountMatch = segments[j].content.match(/(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?\s*(\d+(\.\d+)?)$/) || 
-                                        segments[j].content.match(/(\d+(\.\d+)?)\s*(?:各|个|字|每|打|买|下|x|X|￥|:|：|=)?$/);
-                if (nextAmountMatch) {
-                  amountPerGroup = parseFloat(nextAmountMatch[1]);
-                  break;
-                }
-              }
-            }
-
-            if (amountPerGroup > 0) {
-              const type = seg.type;
-              let k = 0;
-              if (type === '三中三' || type === '三中二') k = 3;
-              else if (type === '二中二') k = 2;
-              else if (type === '特碰') k = 1;
-
-              const lines = contentToProcess.split(/\n/);
-              let segmentCount = 0;
-              let segmentNumbers: string[] = [];
-
-              lines.forEach(line => {
-                const numbers = Array.from(new Set(
-                  (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
-                ));
-
-                if (numbers.length > 0) {
-                  let count = 0;
-                  if (type === '特碰' && numbers.length >= 2) {
-                    count = getCombinations(numbers, 2).length;
-                  } else if (numbers.length >= k) {
-                    count = getCombinations(numbers, k).length;
-                  }
-                  
-                  if (count > 0) {
-                    hasValidBlock = true;
-                    segmentCount += count;
-                    segmentNumbers.push(numbers.map(n => n.toString().padStart(2, '0')).join(' '));
-                  }
-                }
-              });
-
-                if (segmentCount > 0) {
-                  const subTotal = segmentCount * amountPerGroup;
-                  totalBet += subTotal;
-                  const lineText = `${type}: ${segmentNumbers.join(' | ')} 各${amountPerGroup}（合计：${subTotal}）`;
-                  rawPreview += lineText + '\n';
-                  // Check risk for compound segments (flattened numbers across all lines in segment)
-                  const allNumbersInSegment = contentToProcess.split(/\n/).flatMap(line => 
-                    (line.match(/\d+/g) || []).map(Number).filter(n => n >= 1 && n <= 49)
-                  );
-                  const matchCount = getRiskMatchCount(allNumbersInSegment);
-                  const isHighRisk = matchCount >= 8;
-                  previewLines.push(<div key={idx} className={isHighRisk ? "text-red-600 font-bold" : ""}>{renderHighlightedText(lineText)}</div>);
-                }
-            }
-          });
-
-          if (hasValidBlock) {
-            return { preview: <>{previewLines}</>, rawPreview: rawPreview.trim(), total: totalBet };
-          }
-        }
-        return { preview: '格式错误，未识别到玩法或金额。格式如："二中二 05-19 10"', rawPreview: '格式错误', total: 0 };
-      }
-
-      const results = parseInput(input);
-      if (results.length === 0) return { preview: '无法解析，请检查格式', rawPreview: '无法解析', total: 0 };
-      
-      let grandTotal = 0;
-      const rawLines: string[] = [];
-      const previewLines: React.ReactNode[] = [];
-
-      results.forEach((res, idx) => {
-        const count = res.numbers.length;
-        const total = count * res.amount;
-        grandTotal += total;
-        const lineText = `${res.raw} 各${res.amount}（合计：${total}）`;
-        rawLines.push(lineText);
-
-        const matchCount = getRiskMatchCount(res.numbers);
-        const isRiskHigh = matchCount >= 8;
-
-        // 检测是否有大于 49 的数字
-        const hasInvalid = /\d+/.test(res.raw) && (res.raw.match(/\d+/g) || []).some(n => parseInt(n) > 49);
-
-        previewLines.push(
-          <div key={idx} className={`${hasInvalid ? "bg-red-50" : ""} ${isRiskHigh ? "text-red-600 font-bold" : ""}`}>
-            {renderHighlightedText(res.raw)}
-            <span className="opacity-70"> 各{res.amount}（合计：{total}）</span>
-          </div>
-        );
-      });
-
-      return { preview: <>{previewLines}</>, rawPreview: rawLines.join('\n'), total: grandTotal };
-    } catch (e) {
-      return { preview: '解析错误', rawPreview: '解析错误', total: 0 };
-    }
-  };
-
   if (standaloneMode) {
     return (
-      <div className="fixed inset-0 bg-[#F2F1ED] p-4 flex flex-col font-sans tracking-tight overflow-hidden">
-        <div className="flex items-center justify-between border-b-2 border-[#141414] pb-2 mb-4">
+      <div className="fixed inset-0 bg-[#F2F1ED] flex flex-col font-sans tracking-tight overflow-hidden">
+        {/* Fake Desktop Title Bar */}
+        <div className="bg-[#141414] text-[#E4E3E0] px-4 py-2 flex items-center justify-between select-none">
           <div className="flex items-center gap-2">
-            <Calculator size={18} />
-            <h3 className="text-xl font-serif italic font-bold">
-              {modalMode === 'deduct' ? '智能扣除助手' : '智能录入助手'}
+            <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />
+            <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full" />
+            <div className="w-2.5 h-2.5 bg-green-500 rounded-full" />
+            <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] ml-2">
+              {modalMode === 'deduct' ? '智能扣除助手 (DETACHED)' : '智能录入助手 (DETACHED)'}
             </h3>
           </div>
-          <span className={`text-[10px] font-mono font-bold text-white px-2 py-0.5 uppercase ${modalMode === 'deduct' ? 'bg-red-600' : 'bg-[#141414]'}`}>
-            {modalMode === 'deduct' ? 'Deduct Mode' : 'Record Mode'}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-mono opacity-50 uppercase bg-blue-600/20 text-blue-400 px-1 border border-blue-500/30">Sync Active</span>
+          </div>
         </div>
 
-        <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
-          <div className="flex-1 flex flex-col space-y-1 min-h-0">
-            <label className="text-lg font-serif font-bold italic">需识别文字:</label>
+        <div className="flex-1 flex flex-col gap-4 p-6 min-h-0 overflow-hidden">
+          <div className="flex-1 flex flex-col space-y-2 min-h-0">
+            <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字 (数据将自动同步至主窗口):</label>
             <textarea
               ref={modalInputRef}
               autoFocus
@@ -1247,21 +1260,25 @@ export default function App() {
                   handleParse(false, modalInputValue);
                 }
               }}
-              placeholder="请在此输入内容..."
-              className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 focus:outline-none bg-white resize-none shadow-inner"
+              placeholder="在此输入内容..."
+              className="w-full flex-1 p-4 font-mono text-base border-2 border-gray-400 focus:outline-none focus:border-[#141414] bg-white resize-none shadow-inner"
             />
           </div>
 
-          <div className="flex-1 min-h-0 flex flex-col space-y-1">
+          <div className="flex-1 min-h-0 flex flex-col space-y-2">
             <div className="flex justify-between items-end">
-              <label className="text-lg font-serif font-bold italic">识别的结果:</label>
-              <span className="text-xs font-mono font-bold text-blue-600">
-                估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
-              </span>
+              <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别预览:</label>
+              {modalInputValue.trim() && (
+                <div className="flex flex-col items-end">
+                  <span className="text-2xl font-mono font-bold text-blue-600 leading-none">
+                    ¥{formatModalResults(modalInputValue).total.toLocaleString()}
+                  </span>
+                </div>
+              )}
             </div>
             <div 
               ref={standalonePreviewScrollRef}
-              className="flex-1 w-full p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner"
+              className="flex-1 w-full p-4 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner border-dashed"
             >
               {formatModalResults(modalInputValue).preview}
             </div>
@@ -1751,15 +1768,19 @@ export default function App() {
                       <Plus size={16} />
                       <h2 className="text-xs font-mono font-bold uppercase tracking-widest">智能录入系统</h2>
                     </div>
-                    <a 
-                      href={window.location.origin + window.location.pathname + '?mode=entry'} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
+                    <button 
+                      onClick={() => {
+                        window.open(
+                          window.location.origin + window.location.pathname + '?mode=entry',
+                          'InputWindow',
+                          'width=700,height=850,menubar=no,toolbar=no,location=no,status=no,alwaysOnTop=yes'
+                        );
+                      }}
                       className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[10px] font-bold hover:bg-blue-100 transition-colors"
-                      title="打开悬浮录入助手"
+                      title="打开独立工作窗口 (仿真 Electron)"
                     >
-                      🚀 录入助手
-                    </a>
+                      🚀 独立窗口
+                    </button>
                   </div>
                   
                   <div className="flex flex-col gap-2">
@@ -2376,42 +2397,52 @@ export default function App() {
         </div>
       </main>
 
-      {/* Data Entry Modal */}
+      {/* Data Entry Modal (Floating Window System) */}
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-transparent border-4 border-[#141414]/5 ring-1 ring-inset ring-white/20">
+          <div className="fixed inset-0 z-50 pointer-events-none flex items-center justify-center p-4">
             <motion.div 
               drag
               dragControls={dragControls}
               dragListener={false}
               dragMomentum={false}
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              dragConstraints={false}
+              initial={{ scale: 0.95, opacity: 0, y: 30 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              style={{ width: '650px', height: '680px', minWidth: '450px', minHeight: '550px' }}
-              className="bg-[#F2F1ED] border-4 border-[#141414] p-6 flex flex-col gap-4 shadow-none resize overflow-hidden"
+              exit={{ scale: 0.95, opacity: 0, y: 30 }}
+              style={{ width: '680px', height: '700px', minWidth: '450px', minHeight: '550px' }}
+              className="pointer-events-auto bg-[#F2F1ED] border-2 border-[#141414] flex flex-col shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] resize overflow-hidden"
             >
+              {/* Window Title Bar */}
               <div 
                 onPointerDown={(e) => dragControls.start(e)}
-                className="flex items-center justify-between border-b border-[#141414] pb-2 cursor-move select-none"
+                className="bg-[#141414] text-[#E4E3E0] px-4 py-2 flex items-center justify-between cursor-move select-none"
               >
-                <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest pointer-events-none">
-                  智能下注录入
-                </h3>
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />
+                  <div className="w-2.5 h-2.5 bg-yellow-500 rounded-full" />
+                  <div className="w-2.5 h-2.5 bg-green-500 rounded-full" />
+                  <h3 className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] ml-2">
+                    {modalMode === 'deduct' ? '智能扣除助手 (DEDUCT_MODE)' : '智能录入助手 (SYSTEM_V2)'}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-[9px] font-mono opacity-50 uppercase">Always on top</span>
                   <button 
                     onClick={() => setIsModalOpen(false)}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className="text-xs font-mono hover:underline"
+                    className="text-xs font-mono hover:text-white transition-colors"
                   >
                     [关闭]
                   </button>
+                </div>
               </div>
 
-              <div className="flex-1 flex flex-col gap-4 min-h-0">
+              <div className="flex-1 flex flex-col gap-4 p-6 min-h-0">
                 {/* Top Window: Input */}
-                <div className="flex-1 flex flex-col space-y-1 min-h-0">
+                <div className="flex-1 flex flex-col space-y-2 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字:</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">需识别文字 (SHIFT + ENTER 保存):</label>
                   </div>
                   <textarea
                     ref={modalInputRef}
@@ -2425,23 +2456,27 @@ export default function App() {
                         handleParse(false, modalInputValue);
                       }
                     }}
-                    className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 focus:outline-none bg-white resize-none shadow-inner rounded-none"
+                    className="w-full flex-1 p-4 font-mono text-base border-2 border-gray-400 focus:outline-none focus:border-[#141414] bg-white resize-none shadow-inner rounded-none transition-colors"
+                    placeholder="在此输入或粘贴内容..."
                   />
                 </div>
 
                 {/* Bottom Window: Display */}
-                <div className="flex-1 flex flex-col space-y-1 min-h-0">
+                <div className="flex-1 flex flex-col space-y-2 min-h-0">
                   <div className="flex justify-between items-end">
-                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">识别的结果:</label>
+                    <label className="text-[10px] font-mono font-bold uppercase opacity-60">实时识别预览:</label>
                     {modalInputValue.trim() && (
-                      <span className="text-xl font-mono font-bold text-blue-600">
-                        估算总额: ¥{formatModalResults(modalInputValue).total.toLocaleString()}
-                      </span>
+                      <div className="flex flex-col items-end">
+                        <span className="text-2xl font-mono font-bold text-blue-600 leading-none">
+                          ¥{formatModalResults(modalInputValue).total.toLocaleString()}
+                        </span>
+                        <span className="text-[9px] font-mono uppercase opacity-40">Estimated Total</span>
+                      </div>
                     )}
                   </div>
                   <div 
                     ref={previewScrollRef}
-                    className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner"
+                    className="w-full flex-1 p-4 font-mono text-base border-2 border-gray-400 bg-[#F5F5F0] overflow-y-auto whitespace-pre-wrap break-all shadow-inner border-dashed"
                   >
                     {formatModalResults(modalInputValue).preview}
                   </div>
@@ -2911,4 +2946,22 @@ function getBallColor(num: number): string {
   if (blue.includes(num)) return 'bg-blue-500 text-white border-blue-500';
   if (green.includes(num)) return 'bg-green-500 text-white border-green-500';
   return '';
+}
+
+// Helper: Get combinations of k items from array
+function getCombinations<T>(array: T[], k: number): T[][] {
+  const result: T[][] = [];
+  function backtrack(start: number, current: T[]) {
+    if (current.length === k) {
+      result.push([...current]);
+      return;
+    }
+    for (let i = start; i < array.length; i++) {
+       current.push(array[i]);
+       backtrack(i + 1, current);
+       current.pop();
+    }
+  }
+  backtrack(0, []);
+  return result;
 }

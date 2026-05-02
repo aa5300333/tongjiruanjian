@@ -71,7 +71,7 @@ export interface ParseResult {
 }
 
 export const STRONG_KEYWORDS = [
-  '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '各粒', '一个', '各', '粒', '各位', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
+  '一个字', '每个字', '各一个字', '一字', '各数', '各自', '各号', '各字', '个字', '每个', '各粒', '一个', '各', '粒', '各位', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
 ];
 // 弱关键字：仅在数字 >= 50 或有币种后缀时才视为金额锚点
 export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X', '#', '＃'];
@@ -186,10 +186,10 @@ function smartSplitDigits(nStr: string): number[] {
 
 const IGNORE_TARGETS = ['合计', '总计', '总共', '共计', '累计', '合计金额', '总额'];
 const HEADER_KEYWORDS = [
-  '新澳门', '澳门特码', '新奥特码', '澳门特', '澳门', '特码', '澳特', '特',
+  '新澳门特', '新澳门', '澳门特码', '新奥特码', '澳门特', '澳门', '特码', '澳特', '特',
   '上报数据明细', '数据明细', '明细', '报单', '报单明细', '清单', '下注清单',
   '上报散码数据', '散码数据', '上报数据', '上报散码', '散码', '上报',
-  'Vz-HuiPu-PC', '图', '港'
+  'Vz-HuiPu-PC', '图', '港', '新奥'
 ];
 
 /**
@@ -219,7 +219,7 @@ export function parseInput(input: string): ParseResult[] {
     { pattern: /[波数]/g, replacement: '' },
   ];
 
-  let preProcessed = input.replace(/元/g, '元\n'); // 核心优化：元字后方添加换行，强制重置识别生命周期
+  let preProcessed = input.replace(/[元米块]/g, '$&\n'); // 核心优化：关键单位后方添加换行，强制重置识别生命周期
   RECOGNITION_LIBRARY.forEach(rec => {
     preProcessed = preProcessed.replace(rec.pattern, rec.replacement as any);
   });
@@ -244,7 +244,7 @@ export function parseInput(input: string): ParseResult[] {
     return nums.join(' ') + suffix;
   });
 
-  const rawChunks = rangeProcessed.split(/[\n\r;；]+/).map(l => l.trim()).filter(l => l);
+  const rawChunks = rangeProcessed.split(/[\n\r;；，。]+/).map(l => l.trim()).filter(l => l);
   
   const allResults: ParseResult[] = [];
   const COMBO_KEYWORDS = ['三中三', '3中3', '二中二', '2中2', '特碰', '三中二', '二中特'];
@@ -581,7 +581,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 清理目标字符串：只保留数字、生肖、分类等有效关键词，移除所有杂质符号和汉字
   const cleanDisplayRaw = (str: string) => {
     // 允许的字符白名单：数字、生肖、分类(家禽野兽)、颜色、大小单双、范围关键词
-    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色粒]`, 'g');
+    const whitelist = new RegExp(`[^\\d一二三四五六七八九十百千万马蛇龙兔虎牛鼠猪狗鸡猴羊家禽野兽红蓝绿兰篮大小单双到尾头中碰反字数合金木水火土波色粒号]`, 'g');
     
     // 在清理前，先尝试将 Targets 中的谐音字替换为标准字
     let normalized = str;
