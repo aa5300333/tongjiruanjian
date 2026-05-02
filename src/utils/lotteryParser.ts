@@ -74,11 +74,11 @@ export const STRONG_KEYWORDS = [
   '一个字', '每个字', '各一个字', '各数', '各自', '各号', '各字', '个字', '每个', '各粒', '一个', '各', '粒', '各位', '个', '字', '每', '打', '买', '下', '位', '压', '=', '＝', '￥'
 ];
 // 弱关键字：仅在数字 >= 50 或有币种后缀时才视为金额锚点
-export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X', '#'];
+export const WEAK_KEYWORDS = [':', '：', '号', '码', '号码', '波色', '色', '条', 'x', 'X', '#', '＃'];
 export const ALL_KEYWORDS = [...STRONG_KEYWORDS, ...WEAK_KEYWORDS];
 
 // 数据连接符：用于连接多个号码或生肖，不应触发金额切分
-export const DATA_CONNECTORS = ['*', '/', '-', '@', '.', ',', '，', '。', ' ', '\t', '数', '#', '[', ']', '(', ')', '【', '】'];
+export const DATA_CONNECTORS = ['*', '/', '-', '@', '.', ',', '，', '。', ' ', '\t', '数', '#', '＃', '[', ']', '(', ')', '【', '】'];
 
 /**
  * 将中文数字转换为阿拉伯数字 (支持到百位，满足金额需求)
@@ -295,15 +295,15 @@ function checkHasAnchor(text: string): boolean {
 function findAllAnchors(text: string): { index: number, length: number, keyword: string }[] {
   const sortedStrong = [...STRONG_KEYWORDS].sort((a, b) => b.length - a.length);
   const strongPattern = sortedStrong.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒]*`, 'gi');
+  const strongRegex = new RegExp(`(${strongPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒#＃]*`, 'gi');
 
   const sortedWeak = [...WEAK_KEYWORDS].sort((a, b) => b.length - a.length);
   const weakPattern = sortedWeak.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))(?:元|米|斤|块|位|个|一个|粒)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.粒]*(\\d{2,}|[一二三四五六七八九十百千万]+)(?![\\d一二三四五六七八九十百千万])|(${weakPattern})[\\s,，、。#\\-/*@.粒]*(\\d+)(?=[\\s,，、;；。/*@.粒]|$)`, 'gi');
+  const weakRegex = new RegExp(`(${weakPattern})[\\s,，、。#＃\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒#＃]*`, 'gi');
 
-  const yuanSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/gi;
+  const unitSuffixRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*(元|米|斤|块|位|个|#|＃)/gi;
   const implicitRegex = /(?:^|[\s,各，、；;。/*\-@.[\]()【】])(\d{2,})/g;
-  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#\-/*@.粒米斤块位个]*$/gi;
+  const endOfLineAmountRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\s,，、。#＃\-/*@.粒米斤块位个]*$/gi;
 
   const matches: { index: number, length: number, keyword: string }[] = [];
   let m;
@@ -312,17 +312,19 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
     matches.push({ index: m.index, length: m[0].length, keyword: m[1] });
   }
   while ((m = weakRegex.exec(text)) !== null) {
-    const keyword = m[1] || m[4] || m[6];
-    const amountStr = m[2] || m[3] || m[5] || m[7];
+    const keyword = m[1];
+    const amountStr = m[2] || m[3];
     const val = amountStr ? ( /^\d+$/.test(amountStr) ? parseInt(amountStr, 10) : chineseToNumber(amountStr) ) : 0;
-    const hasSuffix = !!m[1]; // Branch 1 matches
+    const hasSuffix = /[元米斤块位个粒#＃]/.test(m[0]);
     
     // “号”字特判：
     if (keyword === '号') {
       const beforeChar = text.substring(0, m.index).trim().slice(-1);
       if (/[\d一二三四五六七八九十百千万]/.test(beforeChar)) {
-        // 作为数据分隔符，跳过金额锚点识别
-        continue;
+        // 如果后面跟着的数字 < 50 且没有单位，则视为数据分隔符
+        if (val < 50 && !hasSuffix) {
+          continue;
+        }
       }
       if (/[\u4e00-\u9fa5]/.test(beforeChar) && !/[一二三四五六七八九十百千万]/.test(beforeChar)) {
         // 如果前方是单纯汉字（如“特号”），视为强力金额锚点
@@ -335,9 +337,9 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
       matches.push({ index: m.index, length: m[0].length, keyword: keyword || 'weak' });
     }
   }
-  while ((m = yuanSuffixRegex.exec(text)) !== null) {
-    // “元”作为强力终止符，必须包含
-    matches.push({ index: m.index, length: m[0].length, keyword: '元' });
+  while ((m = unitSuffixRegex.exec(text)) !== null) {
+    // “元/米/斤/块/位/个/#”作为强力终止符，必须包含
+    matches.push({ index: m.index, length: m[0].length, keyword: m[3] });
   }
   while ((m = implicitRegex.exec(text)) !== null) {
     const val = parseInt(m[1], 10);
@@ -377,7 +379,17 @@ function findAllAnchors(text: string): { index: number, length: number, keyword:
     }
   }
 
-  return matches.sort((a, b) => a.index - b.index);
+  const sortedMatches = matches.sort((a, b) => a.index - b.index);
+  const nonOverlapping: typeof matches = [];
+  let lastEnd = -1;
+  for (const m of sortedMatches) {
+    if (m.index >= lastEnd) {
+      nonOverlapping.push(m);
+      lastEnd = m.index + m.length;
+    }
+  }
+
+  return nonOverlapping;
 }
 
 function splitByAnchors(text: string): string[] {
@@ -471,8 +483,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
   // 规则：强度优先 (Strong > Weak)，位置优先 (Right-most)，长度优先 (Longer wins)
   const sortedKws = [...keywords].sort((a, b) => b.length - a.length);
   const kwPattern = sortedKws.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒]*`, 'g');
-  const yuanRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*元/g;
+  const anchorRegex = new RegExp(`(${kwPattern})[\\s,，、。#\\-/*@.粒]*(?:(\\d+)(?!\\d)|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))[\\s元米斤块位个一个粒#＃]*`, 'g');
+  const unitRegex = /(?:(\d+)(?![\d])|([一二三四五六七八九十百千万]+)(?![一二三四五六七八九十百千万]))\s*(元|米|斤|块|位|个|#|＃)/g;
 
   const matches: { keyword: string, amount: string, index: number, length: number, isStrong: boolean }[] = [];
   let m;
@@ -484,7 +496,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     
     // 弱锚点校验：如果金额 < 50 且没有强币种后缀，则不将其视为金额锚点
     if (!isStrong) {
-      const hasUnit = /[元米斤块位个粒]/.test(m[0]);
+      const hasUnit = /[元米斤块位个粒#＃]/.test(m[0]);
       if (val < 50 && !hasUnit) continue;
     }
 
@@ -497,11 +509,11 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     });
   }
 
-  while ((m = yuanRegex.exec(segment)) !== null) {
+  while ((m = unitRegex.exec(segment)) !== null) {
     // 如果还没被识别，则作为元金额点
-    if (!matches.some(ex => ex.index === m.index)) {
+    if (!matches.some(ex => m && ex.index === m.index)) {
       matches.push({
-        keyword: '元',
+        keyword: m[3],
         amount: m[1] || m[2],
         index: m.index,
         length: m[0].length,
@@ -533,7 +545,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     amountStr = bestMatch.amount;
   } else {
     // 兜底逻辑：找末尾数字 (隐式指令)
-    const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百千万]+)\s*(元|米|斤|块|位|个|一个)?\D*$/);
+    // 同时也适配 米, 斤, # 等单位
+    const tailMatch = segment.match(/^(.*?)(\d+|[一二三四五六七八九十百千万]+)\s*(元|米|斤|块|位|个|一个|#|＃)?\D*$/);
     if (tailMatch) {
       const candidateAmount = tailMatch[2];
       const hasSuffix = !!tailMatch[3];
@@ -581,7 +594,19 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     });
 
     normalized = normalized.replace(/肖/g, ' ');   // 移除单独的“肖”字
-    normalized = normalized.replace(/合数/g, '合'); // 统一将“合数”转换为“合”
+    
+    // 规整“合数”显示：将“合9”、“9合”或“合数9”统一规整为“合数9”，并处理多数字情况
+    normalized = normalized.replace(/(合数?)([\d\s.，、\-\/@*。]+)/g, (match, prefix, digitsStr) => {
+      if (/^[单双大小分]/.test(digitsStr.trim())) return match;
+      const digits = digitsStr.match(/\d/g);
+      if (digits) return digits.map(d => ` 合数${d} `).join(' ');
+      return match;
+    });
+    normalized = normalized.replace(/([\d\s.，、\-\/@*。]+)(合数?)/g, (match, digitsStr, suffix) => {
+      const digits = digitsStr.match(/\d/g);
+      if (digits) return digits.map(d => ` 合数${d} `).join(' ');
+      return match;
+    });
 
     // 智能转换中文数字，避免 "五十" -> "510" 这种错误
     const replaceChinese = (text: string) => {
@@ -660,12 +685,13 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       .replace(/([马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, ' $1 ') // 仅针对生肖字前后增加空格，实现生肖间的分离
       .replace(/(\d+)(?![尾头])/g, ' $1 ')         // 确保普通数字前后有空格，排除尾/头
       .replace(/(\d+[尾头])/g, ' $1 ')             // 确保“X尾/X头”作为一个整体前后有空格
+      .replace(/(合数)\s*(\d+)/g, ' $1$2 ')       // 确保“合数X”为一个整体，防止被拆分后补零
       .replace(/\s+/g, ' ')                       // 合并多个空格
       .trim()
       .split(' ')
       .flatMap(part => {
-        // 如果是 "3尾" 或 "3头" 这种格式，直接返回，不补零
-        const catMatch = part.match(/^(\d+)[尾头]$/);
+        // 如果是 "3尾", "3头" 或 "合数9" 这种格式，直接返回，不补零
+        const catMatch = part.match(/^(\d+)[尾头]$|^合数(\d+)$/);
         if (catMatch) {
           return [part];
         }
@@ -865,6 +891,40 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
             for (let i = 1; i <= 49; i++) {
               if (Math.floor(i / 10) === head) allNumbers.push(i);
             }
+          }
+        });
+        return ' ';
+      }
+      return match;
+    });
+
+    // 1.2 处理 "X合" 或 "合X" (合数)
+    const sumTailRegex = /([\d\s.，、\-\/@*。零一二三四五六七八九]+)合/g;
+    const sumTailPrefixRegex = /合([\d\s.，、\-\/@*。零一二三四五六七八九]+)/g;
+
+    remainingStr = remainingStr.replace(sumTailRegex, (match, prefix) => {
+      const digits = prefix.match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const sumTail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          for (let i = 1; i <= 49; i++) {
+            const digitSum = (Math.floor(i / 10) + (i % 10)) % 10;
+            if (digitSum === sumTail) allNumbers.push(i);
+          }
+        });
+        return ' ';
+      }
+      return match;
+    });
+
+    remainingStr = remainingStr.replace(sumTailPrefixRegex, (match, suffix) => {
+      const digits = suffix.match(/\d|[零一二三四五六七八九]/g);
+      if (digits) {
+        digits.forEach(d => {
+          const sumTail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+          for (let i = 1; i <= 49; i++) {
+            const digitSum = (Math.floor(i / 10) + (i % 10)) % 10;
+            if (digitSum === sumTail) allNumbers.push(i);
           }
         });
         return ' ';
