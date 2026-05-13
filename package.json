@@ -21,7 +21,14 @@
     },
     "files": [
       "dist/**/*",
-      "electron-main.cjs"
+      "electron-main.cjs",
+      "preload.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "public/配置文件.json",
+        "to": "配置文件.json"
+      }
     ],
     "win": {
       "target": "portable"
@@ -34,6 +41,7 @@
     "cross-env": "^10.1.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "firebase": "^12.12.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.0",

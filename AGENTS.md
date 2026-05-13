@@ -1,32 +1,226 @@
 # Project Specific Instructions & Memory Bank
 
+## General Principles (核心准则)
+- **回复语言**: 必须始终使用 **中文** 与用户交流。
+- **逻辑追溯**: 每次修改逻辑和（Parsing）相关的代码并解决问题后，必须将“问题现象”与“修复方案”记录到记忆库中（AGENTS.md 和 纠错文档.md），作为长期规则。其中识别（Parsing）相关的修改必须写入“纠错文档.md”并附加针对该问题的“AI提示词，然后回复我是否写入了纠错文档和AGENTS.md”。
+- **向下兼容**: 任何针对逻辑代码的修改都不得与之前记录的问题冲突，必须保持逻辑兼容，严禁产生功能回退（Regression）。
+- **条件规范**：禁止擅自修改我没有提出问题的代码，除非需要兼容逻辑。禁止擅自新增我没有提出的功能。
+
 ## Lottery Parsing Rules (Regressions to Avoid)
 
+### 1. 基础扩展规则
 - **Tail Numbers (X尾)**: When the input contains "X尾" (e.g., "0尾", "1尾"), it should be expanded to all numbers ending in X (1-49).
     - Example: "0尾各30" -> Numbers: [10, 20, 30, 40], Amount: 30.
     - Example: "1尾各20" -> Numbers: [1, 11, 21, 31, 41], Amount: 20.
-- **Range Numbers (X到Y)**: When the input contains "X到Y" (e.g., "1到5"), it should be expanded to all numbers from X to Y inclusive.
-    - Example: "1到5各10" -> Numbers: [1, 2, 3, 4, 5], Amount: 10.
+- **Range Numbers (X到Y)**: 只要符合球号范围（1-49）且使用“到/至连接”，无论后续是否紧跟关键词均执行展开。
     - Example: "10到15各50" -> Numbers: [10, 11, 12, 13, 14, 15], Amount: 50.
+    - Example: "10到19 30到37各200" -> 成功展开为 10-19 和 30-37 两组数字各 200。
 
-## Design Preferences
-- Maintain a clean, professional financial interface.
-- **UI Style**: Avoid neubrutalism (no heavy black shadows). Use clean borders and subtle backgrounds.
-- **Number Matrix**: 
-    - 5-column layout.
-    - 49 is at the top-right (Row 1, Column 5).
-    - Amount display boxes must have fixed dimensions (e.g., `w-18 h-6`) and not change size with content.
-    - Initial values are blank (empty string), not '0'.
-    - Labels: "Total Turnover" changed to "总和".
-- **Input Parsing**:
-    - Numbers in the "Parse Preview" should be separated by spaces (e.g., `01 02 03`).
-    - Spaces between non-digit characters (like zodiacs) should be removed (e.g., `猪狗`).
-- **Risk Analysis**: Use light gray dividers (`border-gray-100`) and compact row heights (~17px) for high density.
-- **Parsing Categories**:
-    - **家禽/家肖/家**: 牛马羊鸡狗猪 (Standard name: 家禽)
-    - **野肖/野兽/野**: 鼠虎兔龙蛇猴 (Standard name: 野肖)
-- **Recent History**: The main interface's "Recent History" (最近流水) shows only the last 10 records. A "View All" button opens a modal to see all history.
-- **Excel Export**: 
-    - Columns: [原数据, 识别后的数据, 下注金额, 用户中奖金额, 赔付金额（未扣水）].
-    - Hidden comments (red triangle only) for raw data on the third column (Bet Amount).
-- **Calculations**: Match the UI "Winning Amount" (single stake winning).
+### 2. 组合逻辑
+- **合数 (Composite Numbers)**: 
+    - 识别规则: 支持“合数X”、“合X”、“X合”等多种写法。
+    - 扩展逻辑: 自动规整为“合数X”。对于多位数（如 `合数10`），不再拆分为 `1` 和 `0`，且根据数值决定匹配逻辑：值 >= 10 匹配绝对和（如 `合10` 匹配 19, 28, 37, 46）；值 < 10 匹配尾数和。
+    - 预览逻辑: 预览中保持原样显示关键部分（如 `合数10`），不进行补零，以区别普通球号。
+    - 唯一性: 移除自动去重逻辑，尊重用户明确书写的重复目标（如 `合数11 合数11各10` 正确识别为两次下注）。
+- **合单/合双/合大/合小**:
+    - `合单` (合数单) -> `合数相加为奇数` (25个号码)。
+    - `合双` (合数双) -> `合数相加为偶数` (24个号码)。
+    - `合大` (合数大) -> `合数相加为大 (>=7)` (25个号码)。
+    - `合小` (合数小) -> `合数相加为小 (<=6)` (24个号码)。
+    - 这些定义直接指向合数全量集合，不带号码本身的单双或大小过滤。
+- **合数 + 号码属性组合 (自然交集)**:
+    - 逻辑: 识别系统不再硬编码 `合单单` 等词汇，而是通过 **动态交集算法** 实现。当输入 `合单单`（无空格）时，系统自动识别为 `合单` 与 `单` 的交集。
+    - `合单单` -> `合数奇 且 号码奇` (15个)
+    - `合双双` -> `合数偶 且 号码偶` (14个)
+    - `合大大` -> `合数大 且 号码大` (18个)
+    - `合小小` -> `合数小 且 号码小` (17个)
+    - 其他组合如 `合单双`、`合双大` 等逻辑依此类推，均为两项及其以上性质的交集。
+- **交集 vs 并集 (空格敏感)**:
+    - `大单` (无空格) -> 取交集（如：既是大数又是单数）。
+    - `大 单` (有空格) -> 取并集/分别下注（视为两个独立的分类）。
+    - 在预览显示中，必须保留用户输入的空格以区分意图，不准强制合并。
+
+### 3. 多号码收集与显示
+- **Segment合并**: 同一个金额前的所有目标（号码、分类、生肖）必须收集到同一个结果对象中。此外，在 `handleParse` 阶段，属于同一个系统的所有数据片段必须合并为单条流水记录进行落库，严禁按片段拆分为多行显示客户流水。
+- **预览规范**: 预览文字应保持紧凑，数字补零，空格分离。生肖、分类等关键词之间必须保持空格分离（如“龙 虎 各30”），严禁强制合并。入账流水中应按**识别原始顺序**显示格式化后的数据（如“01 02 各10”），严禁按金额大小重排或强制合并。
+
+### 4. 智能赋值符号探测 (applyIsolationLogic)
+- **Dominant Type Rule**: 若行内剔除空格和常规分隔符后，仅剩下**一类**非数字非汉字符号（即使出现多次），则视为金额赋值符（各）。
+- **排除项**: `+`、`＋`、`·`、`~`、`～`、`…` 始终视为数据连接符，严禁转化为赋值符。
+- **强效符号**: `=` 和 `＝` 属于强关键字（STRONG_KEYWORDS），在任何金额下生效，不属于探测逻辑范畴。
+- **歧义门槛**: 对于 `.`、`:`、`/`、`-`、`#`、`*`、`@`：
+    - 若出现多次 -> 且金额均 >= 50 且存在文字“各”作为引导时，依然允许转化（兼容长链混合输入）。
+    - 常规场景下，若仅出现 1 次 -> 且金额 >= 50 才转化。
+- **优先权**: 
+    - 若行内已存在强效符号（如 `=`、`＝`、`#`），则优先以此执行切分。
+    - 若行内混合存在文字关键字（各、字、每个）与歧义符号（`/`、`.`、`:`），当金额 >= 50 时可并存，不会因为已有“各”字而停止探测。
+- **分断隔离**: 在长链指令中，若间隔文本包含 `，`、`。`、`；` 或属于强锚点（如含有“各”），严禁执行“跳过锚点”逻辑，必须作为独立下注片段处理。
+- **元/币种后缀安全逻辑**: 
+    - 严禁使用“全文搜索元”来提升弱符号（如 `-`、`.`）的权重。锚点判断必须是**局部紧贴**的（即 `50元` 是一个整体，但不能因为行末有 `元` 就把行首的 `17-21` 识别为 `17各21`）。
+    - 排序优先级：在同一片段内，**靠左**的强关键字（如 `各`）优于**靠右**的币种后缀（如 `元`），以确保目标字符串清理干净。
+- **系统分割优先级 (System Boundary Priority)**: 遵循“前缀优先，后缀补充”原则。
+    - 夹在两个系统词（如“澳”和“港”）之间的内容，若右侧词后紧跟数据，则归左侧（前缀）；若右侧词处于行末或紧跟其它符号（后缀模式），则归右侧。
+
+### 5. 尾数/头数深度规则
+- **紧贴原则**: 紧贴“尾”字的数字块（如 `345尾`）每一位都视为尾数。
+- **非紧贴原则**: 数字块与“尾”字间有空格时，双字符以上（如 `12 尾`）识别为独立球号，单字符识别为尾数。
+- **显示保护**: 识别结果中禁止出现孤立的“尾”、“头”字符；所有尾数/头数保持简洁格式（如“1尾”），不强制补零，以区分普通球号（如“01”）。针对同一金额，**所有目标（号码、分类、生肖、头尾等）均不执行去重**，如果用户明确输入多次（如“40 40各15”或“9尾 9尾各30”），系统应识别为多次下注并保留在流水记录中。
+- **中文数字解析 (Chinese Number Extraction)**: 在提取独立数字前，必须对原始片段执行 `replaceChinese` 转换。涵盖 `到/至` 范围内的中文数字识别。
+- **Dash Normalization (符号归一化)**: 所有的长横线、中横线、全角横线（如 `–` `—` `－`）必须在预处理阶段统一归一化为标准的半角横线 `-`，以确保 `expandHeadTail` 和 `parseInput` 能正确分割号码。
+- **Cross-Line Isolation (跨行隔离)**: 头尾指令展开（`expandHeadTail`）严禁跨行捕捉数字序列。正则匹配必须排除换行符，防止上一行的金额数值干扰当前行的格式判断。
+- **Zero Filtering (零值拦截)**: 只有 1-49 为合法球号。任何独立出现的数字 `0` 或补零生成的 `00` 均视为无效数据，必须根据上下文转化为尾数（如 `0尾`）或直接过滤，严禁在流水和矩阵中显示 `00`。
+- **Keyword Normalization (关键词归一化)**: “一字”、“字”、“个字”、“一粒”等赋值语义词汇在解析前必须统一归一化为“各”，以确保所有金额提取逻辑和 UI 显示逻辑的一致性。
+- **尾数识别抑制 (Tail Inhibition Refined)**: 只有当“尾/头”紧跟的数字为**多位数**（>=10 且 <=49）且处于使用点/冒号/逗号分隔的列表中时，才执行抑制（视为普通号码）。对于**单位数**（0-9）或**超范围数字**（>49），即便处于列表中，只要其紧贴“尾/头”字样，仍优先识别为尾数并进行展开。
+    - Example: `10.20.8尾` -> Numbers: [10, 20, 08, 18, 28, 38, 48]。
+    - Example: `10.20.12尾` -> Numbers: [10, 20, 12] (多位数 12 被抑制)。
+    - Example: `11. 14257尾` -> Numbers: [11] 和 [1尾, 4尾, 2尾, 5尾, 7尾]。
+    - **金额剥离**: 任何大于 49 的数字（通常是金额）即便出现在候选列表中，也严禁参与上述抑制逻辑，必须允许其两侧的合法号码正常展开。
+- **清空数据并粘贴 (Clear & Paste) 核心逻辑**:
+    - **数据清空**: 发送全局重置信号（Electron: `reset-entry`, Web: `LOTTERY_RESET_REQUEST`）并调用 `handleReset(true, true, undefined, true)`。其参数确保保留风险阈值和特殊号，但清理当前客户的所有实时下注数据。
+    - **内容注入**: 绕过普通的 `handlePasteAndRecognize` 延时逻辑，直接通过 `navigator.clipboard.readText()` 获取文本，并同步更新 `modalInputValue` (持久化层) 和 `localModalValue` (UI渲染层)。
+    - **闭包同步**: 录入弹窗必须将该按钮的触发函数暴露给子组件，并确保其在依赖项变动时更新闭包中的 `lastSubmittedModalValue` 等状态。
+
+### 6. 录入界面规范
+- **系统标识**: 录入弹窗的预览区域，在每个识别结果的起始位置添加该条数据所属系统的单字缩写（如 `[港]` 或 `[澳]`）。要求字体大小与识别结果保持一致，使用普通文本显示（不带悬浮或透明度效果）。
+
+### 6. 特殊分类
+- **男肖**: 鼠牛虎龙马猴狗
+- **女肖**: 兔蛇羊鸡猪
+- **家禽**: 牛马羊鸡狗猪
+- **野肖**: 鼠虎兔龙蛇猴
+- **备注屏蔽**: 移除 `一个号`、`个球` 等冗余后缀时的规则必须极致严谨。严禁在预处理阶段使用全局正则移除 `\d+个` 字符串，因为这会破坏 `23个30` 这种以“个”作为金额符的合法下注。所有冗余词屏蔽应在 `parseSegment` 中针对 `targetsStr`（已确定非金额的部分）局部执行。同时剥离 `香港特`、`澳门特` 等地区报头，清理预览中的孤立 `特` 字。
+
+### 7. 弱符号（冒号、点号）列表隔离逻辑
+- **列表检测**: 在 `applyIsolationLogic` 和 `findAllAnchors` 中引入序列检测。如果冒号 `：` 或点号 `.` 在行内出现多次且用于连接数字（如 `10：20：30`），则严禁将其转化为金额赋值符。
+- **强关键字抑制**: 当行内存在“各”等强金额关键字时，弱符号（如 `:`）识别为金额的门槛提高。除非带有明确的金额单位（如“米”、“元”）或金额巨大（>= 100），否则优先将其视为数据分隔符。
+- **场景描述**: 针对类似 `澳29：10：02：08...各20米` 的输入，所有号码间的冒号在解析阶段必须被视为分隔符（转换为空格），由最后的“各”统一分配金额。
+
+### 8. 合数识别修正
+- **问题**: `合数10` 会被错误拆分为 `合数1` 和 `0`（被过滤），`合数11` 会被拆分为两个 `合数1` 导致计算翻倍。
+- **方案**:
+    1. 修改 `cleanDisplayRaw` 中的 regex，使用 `\d+` 匹配数字块，保留 `10`, `11` 等整体。
+    2. 合数计算逻辑（`sumTailRegex`）统一支持绝对和与尾数和：若目标值 >= 10 (如 10, 11, 12, 13)，则匹配个位十位相加等于该值的号码（如 `合10` 匹配 19, 28, 37, 46）；若 < 10，则匹配个位十位相加的个位等于该值的号码。
+    3. 录入时尊重用户意图，不再对号码集合执行强行去重。
+- **AI 提示词**: 修改合数解析逻辑时，必须使用 `\d+` 匹配数字块格式。计算时：值 >= 10 则匹配 `(tens + ones) === val`，值 < 10 则匹配 `(tens + ones) % 10 === val`。
+- **复合规整 (Normalize Composites)**:
+    - 逻辑: 引入 `normalizeComposites` 函数，在 `cleanDisplayRaw` 和 `parseSegment` 核心解析前执行。
+    - 目标: 强制将 `合 12` 或 `12合` 统一为 `合数12`（移除中间空格），并在此阶段执行 10-13 识别。物理上保留用户输入的多个相同目标，不再执行 Set 去重，彻底杜绝 `合数1 01` 等识别 Regression 并支持手动翻倍录入。
+    - 预览保护: 在 `cleanDisplayRaw` 中处理 `complexRegex` 时，必须使用 `RegExp.exec` 循环来获取准确的 `match.index`，禁止在带有捕获组的 `replace` 回调中直接使用第二个参数作为 offset。
+
+### 9. 关键词归一化 (Keyword Normalization)
+- **语义归整**: “一个号”、“各号”、“个号”、“个”、“一字”、“字”、“个字”、“一粒”等赋值语义词汇在解析前必须统一归一化为“各”，以确保所有金额提取逻辑和 UI 显示逻辑的一致性。
+- **平摊逻辑 (Split Amount)**: 新增强金额分隔符“包”（与“各”同级别）。其作用为将提取到的金额平摊至该片段内的所有号码/目标。
+    - Example: “龙包100” -> 龙包含4个号码，每个号码下注金额 = 100 / 4 = 25。
+
+## Database & Customer Management (客户与数据库管理)
+- **本地化存储**: 使用 `localStorage` 存储客户数据和下注状态。
+- **数据隔离**: 每个客户（Customer）拥有独立的 `financeBetData`、`eatenAmounts`、`financeRecords` 以及 **算式系数 (`coefficient_${customerId}`)**。
+- **自动同步**: 
+    - 切换客户时会自动从 `localStorage` 获取该客户对应的状态并覆盖当前 UI。
+    - **算式系数同步**: 系数存储键 (coefficient_) 强制设为全局共享（不带系统前缀），确保港澳系统间数值实时一致。
+    - 任何操作（下注、清空、吃码、修改系数）都会实时同步到本地存储中的对应客户 Key。
+    - **数据持久化安全**: 在执行“清空面板”等破坏性操作后，系统必须**立即同步执行** `localStorage.setItem` 物理写入，严禁仅依赖带有延迟的 `useEffect` 自动保存。同时，清空当前客户的面板时，必须**同时清空该客户在“香港”和“澳门”两个系统中的所有数据**，以防止因页面切换或重载时出现数据回退。
+    - **跨窗口同步**: 监听 `storage` 事件，确保“录入助手”或多开窗口能实时同步最新的客户列表、下注数据及**算式系数**。
+    - **一键清零**: 侧边栏提供“软件数据清零”功能。执行时会抹除所有业务数据（流水、账目、吃码记录），但**强制保留**两个系统（HK/MO）的客户库（local_customers）以及系统配置（赔率、反水、权重、算式系数等），随后刷新页面恢复初始业务状态。
+
+### 5. 跨系统自动分配 (System Auto-Routing)
+- **系统词 (System Keywords)**: 
+    - 香港系统: 香港, 港, 香, 港码...
+    - 澳门系统: 澳门, 澳, 新澳, 澳码, 门, 奥, 新...
+- **锚点位置申索算法 (New)**: 系统采用双向锚点判定。
+    - **前缀判定 (Logic A)**: 系统词之后的数据归其所有，直到遇到下一个系统词或行末。
+    - **后缀判定 (Logic B)**: 若首段数据块（无前缀词）后紧跟系统词，数据向后归属。
+    - **区间博弈 (Logic C)**: 若两系统词夹持一段数据，默认归属前者（前缀优先）；但若后者处于全文末尾且其后无数据，则中间数据归属于后者（后缀申索）。
+- **全局真值排他性**: 只要全文仅探测到单一类系统的词（如仅有“港”），该次录入强制归属于该系统。
+- **无词默认**: 若全文不包含任何系统引导词，默认归属于澳门系统（MO）。
+- **智能系统识别 (Smart Recognition)**: 
+    - 系统设置中新增开关。
+    - **开启 (ON)**: 遵循 Logic A/B/C 算法进行跨系统自动分配。
+    - **关闭 (OFF)**: 强制忽略所有地区类关键词（如“港”、“澳”），全文识别结果强制归属于新澳门系统（MO）。
+- **识别框精准撤销**: 软件默认设置为 **关闭 (OFF)**。
+- **防抖保护**: `handleParse` 封装了 200ms 的提交锁，物理阻断重复录入。
+- **标点剥离**: 在提取金额前，必须清理片段末尾的 `。`、`；`、`，` 等符号。
+- **客户直达/兜底**: 跨系统录入时，若未指定客户或在汇总页面录入，系统会自动分配给数据库中的第一个生效客户（Default Customer Fallback），确保录入不中断。
+- **保存与同步**: 跨系统数据落库后，当前 UI 会根据系统状态触发实时更新（汇总页面触发 Refresh）。
+    - **排序与同步**: `customers` 数组中的客户顺序可通过 UI 手动调整（上移/下移）。该排序结果会持久化至 `local_customers` 并同步影响“录入助手”及所有客户下拉菜单的显示顺序。
+    - **算式系数**: 客户选择菜单下方新增“算式系数”配置（范围 1% - 100%），支持持久化存储。**逻辑变更**：系数仅在“汇总”模式下计算全局聚合视图时生效（每个客户的数据按各自系数缩放后再累加并四舍五入取整），不影响客户单页的原始下注录入。汇总模式本身不可设置系数。**显示原则**：汇总页面所有的号码分布矩阵（包括统计矩阵与吃码预览矩阵）、总成交额计算、吃码上报解算器以及风险列表，均必须基于缩放后的数据 (`displayBetData`) 进行展示和计算，严禁在汇总模式显示原始未缩放的累加值。
+    - 逻辑：`customer_state_${customerId}`。
+- **无需登录**: 移除 Firebase 依赖，所有操作均在本地进行。
+
+## UI & Design Preferences
+- **Interface**: Clean, professional financial style. No neubrutalism.
+- **Number Matrix**: 5-column layout. 49 is at (Row 1, Column 5). Amount boxes fixed dimensions (`w-18 h-6`).
+- **Input Field**: Initial values blank, labels "总和".
+- **Sidebar Toggle**: The sidebar toggle button is embedded within the "Number Distribution Matrix" block, using the `Menu` icon (`lucide-react`).
+- **Entry Modal Selection**: The customer dropdown in the entry modal (both internal and standalone) excludes the "Summary" (汇总) option. It automatically syncs with the currently selected customer page. If on the Summary page, it defaults to the **last recorded customer** (stored in `last_recorded_customer_id`), or the first real customer if no record exists. This ensures the selection persists even after closing and reopening the modal.
+- **Summary Mode Redirection**: When in "Summary" (汇总) mode, the entry modal (internal or external) must **NEVER** redirect to the target customer's page upon saving. Data is synced silently in the background, and the summary view is instantly refreshed using a `refreshCounter`.
+- **Identity Integrity**: All bet records must capture the `customerName` at the time of entry. When aggregating in Summary mode, if a name is missing, it falls back to the customer's current name, but the entry logic should always explicitly provide the selected customer's name from the modal.
+- **Data Protection**: The "Clear Panel" (清空面板) button in the main number distribution matrix is **disabled** when in "Summary" (汇总) mode to prevent accidental deletion of global statistics.
+- **Targeted Clearing**: The "Clear and Paste" functionality in the entry modal specifically targets the customer selected within the modal's dropdown, ensuring that data for other customers (or the currently viewed customer) is not inadvertently cleared.
+- **Recent History**: Only show last 10 records on main page. "View All" for full history.
+- **Excel Export**: Columns `[原数据, 识别后的数据, 下注金额, 用户中奖金额, 赔付金额（未扣水）]`. Bet Amount 列包含原始数据备注（红三角）。支持多客户分页导出，每个客户对应一个 Excel Sheet。
+
+## System Environment & Interaction (系统环境与交互)
+- **运行层级**: 属于 Web 沙盒应用。受限于浏览器安全策略，无法实现全局“始终置顶”显示，窗口层级由系统焦点分配。
+- **采集逻辑**: 依赖 `window.onfocus` 事件。当用户从其他软件（如微信、Excel）切换回本应用时，系统自动扫描剪贴板内容并进行差异化填充。
+- **模式隔离**: “汇总”模式显示全局聚合视图。从该模式打开录入框时，默认录入至当前客户或指定客户，按钮不再限制。支持汇总模式及所有客户页面的独立吃码管理。新澳门系统（MO）与香港系统共享客户库但财务数据库独立。
+
+## 吃码上报 (Eating/Reporting) 详细计算逻辑与过程
+
+系统采用 **迭代解算器 (Iterative Solver)** 来动态平衡风险，确定每个号码的最佳“留码”（实地自留）金额，超出部分即为建议上报的金额。
+
+### 0. 界面显示逻辑 (UI Display Logic)
+- **双显示框布局**: 每个号码在吃码页面显示两个并列的数值框。
+- **汇总数 (左框)**: 显示当前实地剩余金额 (`总额 - 已上报额`)。
+- **余下上报 (右框)**: 显示本次计算出的新上报建议差额 (`建议总上报 - 已上报额`)。
+- **执行联动**: 点击“执行吃码上报”时，右框金额将并入已上报库，导致左框（汇总数）相应减少，右框清空，符合“汇总减上报”的业务视觉感。
+
+### 1. 核心变量
+- **实际总额 (Gross Amount)**: `financeBetData[i]`，号码 `i` 的原始总下注额。
+- **已上报额 (Already Eaten)**: `eatenAmounts[i]`，该号码历史上已经执行过上报的金额。
+- **反水系数 (r)**: `1 - 反水比例 / 100`（实收资金比例）。
+- **风险阈值 (M)**: `eatingThreshold`，用户设定的最大可承受额外亏损额。
+- **赔率 (O)**: `odds`。
+
+### 2. 计算过程 (计算步骤)
+
+#### 第一阶段：初始化
+1. **留码初始值**: `currentKept[i] = max(0, 实际总额[i] - 已上报额[i])`。
+   > 注意：此处初始化是为了计算在现有上报基础上的“增量”建议。
+
+#### 第二阶段：平衡迭代检查 (核心逻辑)
+由于降低一个号码的留码额会导致总实收资金（Net Income）减少，进而降低其他号码的可容忍限额（Limit），因此需要循环校准：
+1. **计算当前实收利润 (Net Income)**: 
+   `netIncome = sum(所有号码的 currentKept) * r`
+2. **号码巡检**:
+   遍历 1 到 49 号，对每一个号码进行如下检查：
+   - **计算限额 (Limit)**: `limit[i] = (netIncome + M) / O`
+     > 该公式的含义是：该号码的赔付上限不应超过“总收到的钱 + 用户愿意倒贴的风险钱”。
+   - **判定与调整**:
+     - 如果 `currentKept[i] > limit[i]`：
+       - 将 `currentKept[i]` 强制调低至 `limit[i]`。
+       - **关键步**: 因为 `currentKept` 发生了变化，会影响 `netIncome` 及所有号码的 `limit`，所以立即中断本次号码巡检，重新计算 `netIncome` 并开始新一轮完整循环。
+3. **结束条件**:
+   - 所有号码的 `currentKept` 均小于或等于对应的 `limit`。
+   - 或达到 1000 次安全迭代上限。
+
+#### 第三阶段：重要展示逻辑 (Risk Integration)
+- **风险随动**: 所有的风险分析组件（包括侧边栏排行、矩阵高亮）必须实时响应“风险容忍限额 (eatingThreshold)”的变化。
+- **高亮逻辑**: 风险排行榜中，只有当 `NetIncome - Payout < -Threshold` 时，该行才应显示为红色（亏损超标）。严禁仅使用 `risk < 0` 这种固定逻辑，必须与用户设置的容忍度同步。
+
+#### 第三阶段：结果输出
+1. **最终留码额**: 迭代结束后的 `currentKept[i]` 即为系统认为在风险可识别逻辑下应保留在本地的最大金额。
+2. **建议总上报额**: `totalSuggestedReport[i] = 实际总额[i] - currentKept[i]`。
+3. **界面显示 (增量上报)**: 
+   在“吃码上报”视图中，显示的金额为 `totalSuggestedReport[i]`（即相对于原始下注的建议总上报额）。在执行上报动作时，系统会自动计算其与 `alreadyEaten` 的差值作为新增流水记录。
+
+### 3. 逻辑特性
+- **全局关联性**: 该逻辑能确保在控制最高赔付风险的同时，最大限度保留利润。一个号码下注极高会迫使系统建议上报该号码，以免其单一爆奖冲垮余额。
+- **四舍五入**: 计算过程中所有金额均进行四舍五入处理，以符合财务对账直觉。
+
+## System Capabilities
+- **Clipboard Automation**: 
+    - 监听 `window focus`。
+    - 引入 `physical change detection`（物理内容变化才填充）。
+    - 保护规则：仅在输入框为空或内容为“上一次已提交内容”时覆盖，防止篡改用户正在输入的内容。
+- **Calculations**: Winning Amount 必须与 UI 显示的单注中奖计算逻辑一致。

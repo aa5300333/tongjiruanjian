@@ -5,16 +5,43 @@
   --font-mono: "SimSun", "宋体", "STSong", monospace;
   --font-serif: "SimSun", "宋体", "STSong", serif;
   --text-table: 11pt;
+  
+  /* Overwrite default grays to be much darker as per user request */
+  --color-gray-100: #d1d1d1;
+  --color-gray-200: #888888;
+  --color-gray-300: #666666;
+  --color-gray-400: #444444;
+  --color-gray-500: #222222;
+  --color-gray-600: #111111;
 }
 
 @layer base {
+  * {
+    opacity: 1 !important;
+  }
+  
   html, body {
-    @apply min-h-screen w-full;
+    @apply min-h-screen w-full text-[#000000];
     background-color: #E4E3E0;
+    line-height: 1.2;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   
   table, .lottery-table {
     font-family: "SimSun", "宋体", "STSong", serif;
     font-size: 11pt;
   }
+}
+
+@utility no-scrollbar {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
 }
