@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import XLSX from 'xlsx-js-style';
+import { invoke } from '@tauri-apps/api/tauri';
 import { parseInput, ZODIAC_LIST, getNumbersByZodiac } from './utils/lotteryParser';
 import defaultConfig from '../public/配置文件.json';
 
@@ -1908,7 +1909,7 @@ export default function App() {
     return results;
   };
 
-  const handleParse = useCallback((isNegative: boolean = false, customInput?: string, overrideTargetId?: string, resetBefore: boolean = false) => {
+  const handleParse = useCallback(async (isNegative: boolean = false, customInput?: string, overrideTargetId?: string, resetBefore: boolean = false) => {
     const inputToParse = customInput !== undefined ? customInput : (modalInputValue || '');
     if (!inputToParse || !inputToParse.trim()) return;
 
@@ -2012,6 +2013,16 @@ export default function App() {
     }
 
     // --- 智能分发逻辑开始 ---
+    
+    // Tauri 迁移：优先使用 Rust 进行高性能批量解析
+    let rawResultsFromRust = null;
+    try {
+      rawResultsFromRust = await invoke('parse_lottery_data', { input: inputToParse });
+      console.log('Rust 统计逻辑返回结果:', rawResultsFromRust);
+    } catch (e) {
+      console.log('跳过 Rust 解析，使用 JS 默认引擎:', e);
+    }
+
     const rawTasks = splitBySystem(inputToParse);
     let anySuccess = false;
 
@@ -2032,7 +2043,18 @@ export default function App() {
         const items: BetItem[] = [];
         const taskText = task.text;
 
-        if (activeView === 'compound') {
+        // Tauri Migration: Use Rust results if available
+        if (rawResultsFromRust && Array.isArray(rawResultsFromRust) && rawResultsFromRust.length > 0) {
+            (rawResultsFromRust as any[]).forEach(res => {
+                items.push({
+                    targets: res.numbers,
+                    amount: res.amount,
+                    raw: res.raw,
+                    system: task.system
+                });
+            });
+            anySuccess = true;
+        } else if (activeView === 'compound') {
           // Compound parsing logic... (keeping for completeness)
           const types = ['三中三', '二中二', '三中二', '特碰'];
           const matches: { type: string, index: number }[] = [];
@@ -2439,8 +2461,19 @@ export default function App() {
     }
   }, [handlePasteAndRecognize, handleReset, handleResetEaten, requireUndoPasteConfirm, standaloneMode, getSysKey]);
 
-  const handlePopOut = useCallback(() => {
+  const handlePopOut = useCallback(async () => {
     console.log('触发 handlePopOut, mode:', modalMode);
+    
+    // Tauri 迁移逻辑：调用 Rust 命令快速显示预创建窗口
+    try {
+      await invoke('show_entry_window');
+      setIsModalOpen(false);
+      console.log('Tauri 录入窗口已通过 Rust 快速显示');
+      return;
+    } catch (e) {
+      console.log('非 Tauri 环境或调用失败:', e);
+    }
+
     if (window.electron) {
       console.log('检测到 Electron 桥接 environment, 调用 showEntryWindow');
       window.electron.showEntryWindow(modalMode);
