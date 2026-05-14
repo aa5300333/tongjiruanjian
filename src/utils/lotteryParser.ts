@@ -289,6 +289,20 @@ const HEADER_KEYWORDS = [
 ];
 
 /**
+ * 辅助函数：将 "蓝绿波" 展开为 "蓝波 绿波"
+ */
+function expandWaves(text: string): string {
+  // 识别模式：(红/蓝/绿)(红/蓝/绿)波
+  const waveRegex = /([红蓝绿兰篮]+)波/g;
+  return text.replace(waveRegex, (match, colors) => {
+    return colors.split('').map((c: string) => {
+      const standardColor = (c === '兰' || c === '篮') ? '蓝' : c;
+      return `${standardColor}波`;
+    }).join(' ');
+  });
+}
+
+/**
  * 辅助函数：将 "1 2 345尾" 展开为 "1尾 2尾 3尾 4尾 5尾"
  * 确保解析器看到的已是标准的带方向关键词的数据。
  */
@@ -328,7 +342,7 @@ function expandHeadTail(text: string): string {
 
         if (/^\d+$|^[零一二三四五六七八九]$/.test(part)) {
           let shouldExpand = false;
-          const isSingleDigit = (part.length === 1 || (part.length === 2 && part.startsWith('0')));
+          const isSingleDigit = (part.length === 1);
 
           if (i === lastDigitIdx) {
             let attached = true;
@@ -529,6 +543,9 @@ export function parseInput(input: string): ParseResult[] {
   // 3. 统一转换中文数字，确保后续逻辑（如范围、头尾处理）能识别阿拉伯数字
   preProcessed = replaceChinese(preProcessed);
 
+  // 预处理：波色展开 (蓝绿波 -> 蓝波 绿波)
+  preProcessed = expandWaves(preProcessed);
+
   // 【核心修复】预处理：头尾指令展开
   const expandedInput = expandHeadTail(preProcessed);
   preProcessed = expandedInput;
@@ -555,9 +572,6 @@ export function parseInput(input: string): ParseResult[] {
     { pattern: /门[：:]/g, replacement: '门 ' },
     // 块/快/元 统一规整，方便锚点切割
     { pattern: /快/g, replacement: '块' },
-    // 屏蔽“波”字，规范识别（如蓝波双 -> 蓝双）
-    // 注意：不再删除“数”字，因为它在“合数”中是必要的，且在 whitelist 中已允许
-    { pattern: /波/g, replacement: '' },
   ];
 
   preProcessed = preProcessed.replace(/元/g, '元\n'); // 核心优化：元字后方添加换行，强制重置识别生命周期
@@ -1009,8 +1023,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     
     // 1. 预处理谐音和规整合数/波色
     let normalized = str.replace(/[兰篮]/g, '蓝');
-    normalized = normalized.replace(/(红|蓝|绿)波/g, '$1');
-    normalized = normalized.replace(/(红|蓝|绿)(?!单|双|大|小|合)/g, '$1波');
+    normalized = normalized.replace(/(红|蓝|绿)(?!单|双|大|小|合|波)/g, '$1波');
     
     // 2. 规整“合数”状态
     normalized = normalizeComposites(normalized);
@@ -1035,55 +1048,44 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     });
 
     // 4. 保护复合词：确保合数、波色、头尾保持完整，不被空格拆分
-    const comboKeys = '合大单单|合大单双|合大双单|合大双双|合小单单|合小单双|合小双单|合小双双|合大大|合小小|合单单|合双双|合大单|合大双|合小单|合小双|大单|大双|小单|小双|红大单|红大双|红小单|红小双|蓝大单|蓝大双|蓝小单|蓝小双|绿大单|绿大双|绿小单|绿小双|红大|红小|红单|红双|蓝大|蓝小|蓝单|蓝双|绿大|绿小|绿单|绿双|家禽|野肖|男肖|女肖|反数';
-    const complexRegex = new RegExp(`(合(?:数)?\\s*(?:[大小单双]+|\\d+))|(${comboKeys})|(?:红|蓝|绿)波[大小单双]|(?:\\d+[尾头])`, 'g');
+    const comboKeys = '家禽|野肖|男肖|女肖|反数';
+    const complexRegex = new RegExp(`(合(?:数)?\\s*(?:[大小单双]+|\\d+))|(${comboKeys})|(?:红|蓝|绿)波[大小单双]|(?:\\d+[头尾])`, 'g');
     const finalSegments: string[] = [];
     let lastIdx = 0;
 
-    const cleanRawText = (text: string) => {
-      return text
-        .replace(whitelist, ' ')
-        .replace(/([马蛇龙兔虎牛鼠猪狗鸡猴羊])/g, ' $1 ')
-        .replace(/(\d+)/g, ' $1 ')
-        .replace(/([大小单双])/g, ' $1 ');
+    // 修改为支持原始间距策略：无空格即交集
+    const cleanRawTextWithSpacing = (text: string) => {
+      // 保持原始空格分布，只清理非法字符，保留单个空格作为分隔符逻辑
+      return text.replace(whitelist, '');
     };
 
-    // 使用 RegExp.exec 循环代替 replace，以获得准确的 offset
+    // 使用 RegExp.exec 循环代替 replace，以获得准确 of offset
     let match;
     while ((match = complexRegex.exec(normalized)) !== null) {
       const offset = match.index;
       const prevText = normalized.slice(lastIdx, offset);
-      const cleanedPrev = cleanRawText(prevText);
-      if (cleanedPrev.trim()) finalSegments.push(cleanedPrev);
+      const cleanedPrev = cleanRawTextWithSpacing(prevText);
+      if (cleanedPrev) finalSegments.push(cleanedPrev);
       
       // match[0] 是完整匹配项，将其内部空格移除后推入
       finalSegments.push(match[0].replace(/\s+/g, '')); 
       lastIdx = offset + match[0].length;
     }
     
-    const remainingText = cleanRawText(normalized.slice(lastIdx));
-    if (remainingText.trim()) finalSegments.push(remainingText);
+    const remainingText = cleanRawTextWithSpacing(normalized.slice(lastIdx));
+    if (remainingText) finalSegments.push(remainingText);
 
-    return finalSegments.join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(' ')
-      .flatMap(part => {
-        if (/^合(?:数)?(?:[大小单双]+|\d+)$/.test(part) || /^(?:红|蓝|绿)波[大小单双]$/.test(part) || /^(\d+)[尾头]$/.test(part)) {
-          return [part]; 
-        }
-        if (/^[合头尾数]$/.test(part) || part === '') return [];
-        
-        if (/^\d+$/.test(part)) {
-          const val = parseInt(part, 10);
-          if (val >= 1 && val <= 49) return [part.padStart(2, '0')];
-          return val === 0 ? [] : [part];
-        }
-        return [part];
-      })
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // 最终拼接：由于 finalSegments 已经包含了原始空格（如果有），这里使用 join('')
+    const rawResult = finalSegments.join('').replace(/\s+/g, ' ').trim();
+    
+    // 补零逻辑：仅针对孤立的数字 (1-49)
+    return rawResult.split(' ').map(part => {
+      if (/^\d{1,2}$/.test(part)) {
+        const val = parseInt(part, 10);
+        if (val >= 1 && val <= 49) return part.padStart(2, '0');
+      }
+      return part;
+    }).join(' ');
   };
 
   // 清理金额字符串，只保留数字和中文数字，防止由于系统词粘连导致的解析失败
@@ -1126,8 +1128,6 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     }
   } else {
     // 特码逻辑：收集该段内所有的号码
-    const allNumbers: number[] = [];
-    
     // 保护包含关键字的特殊组合 (如 '合单')，防止被后续的干扰词移除逻辑误删
     const PROTECTED_COMBOS = ['倒反数', '反数', '反字', '倒反', '反'];
     let protectedStr = targetsStr;
@@ -1181,154 +1181,14 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     // 修改：不再移除所有空格，只合并空格并修整边缘，确保数字间保留空格
     displayRaw = displayRaw.replace(/\s+/g, ' ').trim(); 
 
-    // 0. 处理分类 (家禽/野兽)
-    // 逻辑说明：此处直接映射到生肖名称。解析时通过 getNumbersByZodiac(z) 动态获取号码。
-    // 只要顶部的 ZODIAC_LIST 随年份更新（首位为当年生肖），此处逻辑将自动适配，无需手动修改号码。
-    const CATEGORIES = [
-      { key: ['家禽', '家肖', '家'], zodiacs: ['牛', '马', '羊', '鸡', '狗', '猪'] },
-      { key: ['野肖', '野兽', '野'], zodiacs: ['鼠', '虎', '兔', '龙', '蛇', '猴'] },
-      { key: ['男肖', '男'], zodiacs: ['鼠', '牛', '虎', '龙', '马', '猴', '狗'], showZodiacs: true },
-      { key: ['女肖', '女'], zodiacs: ['兔', '蛇', '羊', '鸡', '猪'], showZodiacs: true },
-    ];
-
-    CATEGORIES.forEach(cat => {
-      const pattern = cat.key.join('|');
-      const regex = new RegExp(pattern, 'g');
-      // 使用 remainingStr 进行检测，防止命中已被移除的关键词
-      if (regex.test(remainingStr)) {
-        const count = (remainingStr.match(regex) || []).length;
-        const catNumbers: number[] = [];
-        cat.zodiacs.forEach(z => {
-          catNumbers.push(...getNumbersByZodiac(z));
-        });
-
-        for (let i = 0; i < count; i++) {
-          allNumbers.push(...catNumbers);
-        }
-        
-        // 如果匹配到了分类，根据配置决定显示名称
-        const replacePattern = new RegExp(cat.key.sort((a, b) => b.length - a.length).join('|'), 'g');
-        const displayName = (cat as any).showZodiacs ? cat.zodiacs.join('') : cat.key[0];
-        displayRaw = displayRaw.replace(replacePattern, displayName);
-        remainingStr = remainingStr.replace(regex, ' ');
-      }
-    });
-
-    // 1. 处理 "X尾" 或 "尾X"
-    // 由于已经经过 expandHeadTail 预处理，此处只需匹配紧贴的数字即可
-    const tailRegex = /(\d|[零一二三四五六七八九])尾/g;
-    const tailPrefixRegex = /尾(\d|[零一二三四五六七八九])/g;
-    
-    // 移除二次保险中的抑制逻辑，因为单数值头尾应始终允许扩展，且 expandHeadTail 已处理
-    remainingStr = remainingStr.replace(tailRegex, (match, d) => {
-      const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-      const nums: number[] = [];
-      for (let i = 1; i <= 49; i++) {
-        if (i % 10 === tail) nums.push(i);
-      }
-      allNumbers.push(...nums);
-      return ' ';
-    });
-
-    remainingStr = remainingStr.replace(tailPrefixRegex, (match, d) => {
-      const tail = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-      const nums: number[] = [];
-      for (let i = 1; i <= 49; i++) {
-        if (i % 10 === tail) nums.push(i);
-      }
-      allNumbers.push(...nums);
-      return ' ';
-    });
-
-    // 1.1 处理 "X头" 或 "头X"
-    const headRegex = /(\d|[零一二三四五六七八九])头/g;
-    const headPrefixRegex = /头(\d|[零一二三四五六七八九])/g;
-    
-    remainingStr = remainingStr.replace(headRegex, (match, d) => {
-      const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-      if (head >= 0 && head <= 4) {
-        const nums: number[] = [];
-        for (let i = 1; i <= 49; i++) {
-          if (Math.floor(i / 10) === head) nums.push(i);
-        }
-        allNumbers.push(...nums);
-      }
-      return ' ';
-    });
-
-    remainingStr = remainingStr.replace(headPrefixRegex, (match, d) => {
-      const head = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-      if (head >= 0 && head <= 4) {
-        const nums: number[] = [];
-        for (let i = 1; i <= 49; i++) {
-          if (Math.floor(i / 10) === head) nums.push(i);
-        }
-        allNumbers.push(...nums);
-      }
-      return ' ';
-    });
-
-    // 1.2 处理 "X合" 或 "合X" (合数)
-    // 逻辑：由于 remainingStr 已通过 normalizeComposites 规整，此时合数均以“合数X”形式存在
-    const sumTailPrefixRegex = /合数\s*(\d+|[零一二三四五六七八九]+)/g;
-
-    remainingStr = remainingStr.replace(sumTailPrefixRegex, (match, d) => {
-      const val = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
-      const nums: number[] = [];
-      for (let i = 1; i <= 49; i++) {
-        const digitSum = (Math.floor(i / 10) + (i % 10));
-        if (val >= 10) {
-          if (digitSum === val) nums.push(i);
-        } else {
-          if (digitSum % 10 === val) nums.push(i);
-        }
-      }
-      allNumbers.push(...nums);
-      return ' ';
-    });
-
-    // 2. 处理 "X到Y"
-    const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*到\s*(\d+|[一二三四五六七八九十百]+)/g;
-    let rangeMatch;
-    // 使用 remainingStr 进行正则匹配
-    while ((rangeMatch = rangeRegex.exec(remainingStr)) !== null) {
-      const startStr = rangeMatch[1];
-      const endStr = rangeMatch[2];
-      const start = /\d/.test(startStr) ? parseInt(startStr, 10) : chineseToNumber(startStr);
-      const end = /\d/.test(endStr) ? parseInt(endStr, 10) : chineseToNumber(endStr);
-      const min = Math.min(start, end);
-      const max = Math.max(start, end);
-      for (let i = min; i <= max; i++) {
-        if (i >= 1 && i <= 49) allNumbers.push(i);
-      }
-    }
-    remainingStr = remainingStr.replace(rangeRegex, ' ');
-
-    // 3. 大小单双 & 特殊组合逻辑
-    const combinations = [
-      // 3项/4项组合
-      { key: '合大单单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 !== 0 && n % 2 !== 0; } },
-      { key: '合大单双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 !== 0 && n % 2 === 0; } },
-      { key: '合大双单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 === 0 && n % 2 !== 0; } },
-      { key: '合大双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && s % 2 === 0 && n % 2 === 0; } },
-      { key: '合小单单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 !== 0 && n % 2 !== 0; } },
-      { key: '合小单双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 !== 0 && n % 2 === 0; } },
-      { key: '合小双单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 === 0 && n % 2 !== 0; } },
-      { key: '合小双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && s % 2 === 0 && n % 2 === 0; } },
-      { key: '合大大', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && n >= 25; } },
-      { key: '合小小', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && n <= 24; } },
-      { key: '合单单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 !== 0 && n % 2 !== 0; } },
-      { key: '合双双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s % 2 === 0 && n % 2 === 0; } },
-      { key: '合大单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && n % 2 !== 0; } },
-      { key: '合大双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s >= 7 && n % 2 === 0; } },
-      { key: '合小单', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && n % 2 !== 0; } },
-      { key: '合小双', filter: (n: number) => { const s = Math.floor(n / 10) + (n % 10); return s <= 6 && n % 2 === 0; } },
+    const combinations: { key: string, filter: (n: number) => boolean }[] = [
+      // 常见两项组合 (支持乱序)
       { key: '大单', filter: (n: number) => n >= 25 && n % 2 !== 0 },
       { key: '大双', filter: (n: number) => n >= 25 && n % 2 === 0 },
       { key: '小单', filter: (n: number) => n <= 24 && n % 2 !== 0 },
       { key: '小双', filter: (n: number) => n <= 24 && n % 2 === 0 },
 
-      // 波色 + 大小 + 单双 组合
+      // 四属性交集 (如红大单双等)
       { key: '红大单', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n >= 25 && n % 2 !== 0 },
       { key: '红大双', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n >= 25 && n % 2 === 0 },
       { key: '红小单', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) && n <= 24 && n % 2 !== 0 },
@@ -1339,6 +1199,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       { key: '蓝小双', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) && n <= 24 && n % 2 === 0 },
       { key: '绿大单', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n >= 25 && n % 2 !== 0 },
       { key: '绿大双', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n >= 25 && n % 2 === 0 },
+      { key: '绿小單', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n <= 24 && n % 2 !== 0 },
       { key: '绿小单', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n <= 24 && n % 2 !== 0 },
       { key: '绿小双', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) && n <= 24 && n % 2 === 0 },
 
@@ -1385,10 +1246,11 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       { key: '小', filter: (n: number) => n <= 24 },
       { key: '单', filter: (n: number) => n % 2 !== 0 },
       { key: '双', filter: (n: number) => n % 2 === 0 },
+      { key: '红波', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) },
+      { key: '蓝波', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) },
+      { key: '绿波', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) },
       { key: '红', filter: (n: number) => (COLOR_MAP['红'] as any).includes(n) },
       { key: '蓝', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) },
-      { key: '兰', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) },
-      { key: '篮', filter: (n: number) => (COLOR_MAP['蓝'] as any).includes(n) },
       { key: '绿', filter: (n: number) => (COLOR_MAP['绿'] as any).includes(n) },
       { key: '金', filter: (n: number) => (ELEMENTS_MAP['金'] as any).includes(n) },
       { key: '木', filter: (n: number) => (ELEMENTS_MAP['木'] as any).includes(n) },
@@ -1402,106 +1264,242 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
 
     combinations.sort((a, b) => b.key.length - a.key.length);
 
-    // 交叉组合识别逻辑 (针对无分隔符的组合，如 "红小双")
-    if (!hasSeparators) {
+    // 交叉组合识别逻辑 (针对空格隔离的单词执行局部交集)
+    const wordSegments = remainingStr.split(/\s+/).filter(p => !!p.trim());
+    const allNumbersFromSegments: number[] = [];
+    const rawTokens: string[] = [];
+
+    wordSegments.forEach((word) => {
       const intersectionFilters: ((n: number) => boolean)[] = [];
-      const matchedKeys: string[] = [];
+      const matchedKeysInWord: string[] = [];
+      let tempWord = word;
+
+      // --- 动态模式匹配 (提取属性并执行 Mask) ---
       
-      // 按长度从长到短处理，防止子串重复匹配
-      const sortedCombos = [...combinations].sort((a, b) => b.key.length - a.key.length);
-      let tempStr = remainingStr;
-      
-      sortedCombos.forEach(combo => {
-        if (tempStr.includes(combo.key)) {
-          intersectionFilters.push(combo.filter);
-          matchedKeys.push(combo.key);
-          // 将已匹配部分占位，防止被更短的词再次匹配
-          tempStr = tempStr.replace(new RegExp(combo.key, 'g'), ' '.repeat(combo.key.length));
+      // 1. 范围 (Range)
+      const rangeRegex = /(\d+|[一二三四五六七八九十百]+)\s*(?:到|至)\s*(\d+|[一二三四五六七八九十百]+)/g;
+      let mRange;
+      while ((mRange = rangeRegex.exec(tempWord)) !== null) {
+        const start = /\d/.test(mRange[1]) ? parseInt(mRange[1], 10) : chineseToNumber(mRange[1]);
+        const end = /\d/.test(mRange[2]) ? parseInt(mRange[2], 10) : chineseToNumber(mRange[2]);
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
+        if (!isNaN(min) && !isNaN(max)) {
+          intersectionFilters.push((n: number) => n >= min && n <= max && n <= 49);
+          matchedKeysInWord.push(mRange[0]);
+          tempWord = tempWord.replace(mRange[0], ' '.repeat(mRange[0].length));
+        }
+      }
+
+      // 2. 尾 (Tail)
+      const tailPat = /(\d|[零一二三四五六七八九])尾|尾(\d|[零一二三四五六七八九])/g;
+      let mTail;
+      while ((mTail = tailPat.exec(tempWord)) !== null) {
+        const d = mTail[1] || mTail[2];
+        const val = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+        intersectionFilters.push((n: number) => n % 10 === val);
+        matchedKeysInWord.push(mTail[0]);
+        tempWord = tempWord.replace(mTail[0], ' '.repeat(mTail[0].length));
+      }
+
+      // 3. 头 (Head)
+      const headPat = /(\d|[零一二三四五六七八九])头|头(\d|[零一二三四五六七八九])/g;
+      let mHead;
+      while ((mHead = headPat.exec(tempWord)) !== null) {
+        const d = mHead[1] || mHead[2];
+        const val = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+        if (val >= 0 && val <= 4) {
+          intersectionFilters.push((n: number) => Math.floor(n / 10) === val);
+          matchedKeysInWord.push(mHead[0]);
+          tempWord = tempWord.replace(mHead[0], ' '.repeat(mHead[0].length));
+        }
+      }
+
+      // 4. 合数 (Composites)
+      const sumTailRegex = /合数\s*(\d+|[零一二三四五六七八九]+)/g;
+      let mSum;
+      while ((mSum = sumTailRegex.exec(tempWord)) !== null) {
+        const val = /\d/.test(mSum[1]) ? parseInt(mSum[1], 10) : chineseToNumber(mSum[1]);
+        intersectionFilters.push((n: number) => {
+          const s = Math.floor(n / 10) + (n % 10);
+          return val >= 10 ? (s === val) : (s % 10 === val);
+        });
+        matchedKeysInWord.push(mSum[0]);
+        tempWord = tempWord.replace(mSum[0], ' '.repeat(mSum[0].length));
+      }
+
+      // 5. 分类 (Categories)
+      const CAT_ITEMS = [
+        { key: ['家禽', '家肖', '家'], zodiacs: ['牛', '马', '羊', '鸡', '狗', '猪'] },
+        { key: ['野肖', '野兽', '野'], zodiacs: ['鼠', '虎', '兔', '龙', '蛇', '猴'] },
+        { key: ['男肖', '男'], zodiacs: ['鼠', '牛', '虎', '龙', '马', '猴', '狗'] },
+        { key: ['女肖', '女'], zodiacs: ['兔', '蛇', '羊', '鸡', '猪'] },
+      ];
+      CAT_ITEMS.forEach(cat => {
+        const pattern = cat.key.join('|');
+        const regex = new RegExp(`(${pattern})`, 'g');
+        let mCat;
+        while ((mCat = regex.exec(tempWord)) !== null) {
+          const catNums = cat.zodiacs.flatMap(z => getNumbersByZodiac(z));
+          intersectionFilters.push((n: number) => catNums.includes(n));
+          matchedKeysInWord.push(mCat[1]);
+          tempWord = tempWord.replace(mCat[1], ' '.repeat(mCat[1].length));
         }
       });
 
+      // 6. 静态属性词 (Combinations)
+      const sortedCombos = [...combinations].sort((a, b) => b.key.length - a.key.length);
+      sortedCombos.forEach(combo => {
+        if (tempWord.includes(combo.key)) {
+          intersectionFilters.push(combo.filter);
+          matchedKeysInWord.push(combo.key);
+          tempWord = tempWord.replace(new RegExp(combo.key, 'g'), ' '.repeat(combo.key.length));
+        }
+      });
+
+      // --- 处理逻辑：交集 vs 并集 ---
+
+      // 如果单词内部有 2 个或以上属性词且交集非空 -> 视为交集
       if (intersectionFilters.length >= 2) {
         const intersectionNums = [];
         for (let n = 1; n <= 49; n++) {
           if (intersectionFilters.every(f => f(n))) intersectionNums.push(n);
         }
         if (intersectionNums.length > 0) {
-          return [{ numbers: intersectionNums, amount, raw: displayRaw, type: comboType }];
+          allNumbersFromSegments.push(...intersectionNums);
+          rawTokens.push(matchedKeysInWord.join('')); // 交集内部紧凑
+          return;
         }
       }
-    }
 
-    combinations.forEach(combo => {
-      const regex = new RegExp(combo.key, 'g');
-      const count = (remainingStr.match(regex) || []).length;
-      if (count > 0) {
-        const comboNumbers: number[] = [];
-        for (let n = 1; n <= 49; n++) {
-          if (combo.filter(n)) comboNumbers.push(n);
+      // 否则，作为独立 Token 处理其并集 (支持词内混合：如 "龙9" 或 "红双 10")
+      let workingWord = word;
+      const localTokens: { text: string, index: number, nums: number[] }[] = [];
+
+      // 再次应用同样的探测逻辑以生成 localTokens
+      const detectAndAdd = (regex: RegExp, filterFactory: (m: string[]) => (n: number) => boolean) => {
+        let m;
+        while ((m = regex.exec(workingWord)) !== null) {
+          const filter = filterFactory(m);
+          const nums: number[] = [];
+          for (let n = 1; n <= 49; n++) if (filter(n)) nums.push(n);
+          localTokens.push({ text: m[0], index: m.index, nums });
+          workingWord = workingWord.substring(0, m.index) + ' '.repeat(m[0].length) + workingWord.substring(m.index + m[0].length);
         }
-        
-        for (let i = 0; i < count; i++) {
-          allNumbers.push(...comboNumbers);
+      };
+
+      // 并集版：范围
+      detectAndAdd(/(\d+|[一二三四五六七八九十百]+)\s*(?:到|至)\s*(\d+|[一二三四五六七八九十百]+)/g, (m) => {
+        const start = /\d/.test(m[1]) ? parseInt(m[1], 10) : chineseToNumber(m[1]);
+        const end = /\d/.test(m[2]) ? parseInt(m[2], 10) : chineseToNumber(m[2]);
+        const min = Math.min(start, end);
+        const max = Math.max(start, end);
+        return (n: number) => n >= min && n <= max && n <= 49;
+      });
+
+      // 并集版：尾
+      detectAndAdd(/(\d|[零一二三四五六七八九])尾|尾(\d|[零一二三四五六七八九])/g, (m) => {
+        const d = m[1] || m[2];
+        const val = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+        return (n: number) => n % 10 === val;
+      });
+
+      // 并集版：头
+      detectAndAdd(/(\d|[零一二三四五六七八九])头|头(\d|[零一二三四五六七八九])/g, (m) => {
+        const d = m[1] || m[2];
+        const val = /\d/.test(d) ? parseInt(d, 10) : chineseToNumber(d);
+        return (n: number) => Math.floor(n / 10) === val;
+      });
+
+      // 并集版：合数
+      detectAndAdd(/合数\s*(\d+|[零一二三四五六七八九]+)/g, (m) => {
+        const val = /\d/.test(m[1]) ? parseInt(m[1], 10) : chineseToNumber(m[1]);
+        return (n: number) => {
+          const s = Math.floor(n / 10) + (n % 10);
+          return val >= 10 ? (s === val) : (s % 10 === val);
+        };
+      });
+
+      // 并集版：分类
+      CAT_ITEMS.forEach(cat => {
+        const pattern = cat.key.join('|');
+        const regex = new RegExp(`(${pattern})`, 'g');
+        let mCat;
+        while ((mCat = regex.exec(workingWord)) !== null) {
+          const catNums = cat.zodiacs.flatMap(z => getNumbersByZodiac(z));
+          localTokens.push({ text: mCat[1], index: mCat.index, nums: catNums });
+          workingWord = workingWord.substring(0, mCat.index) + ' '.repeat(mCat[1].length) + workingWord.substring(mCat.index + mCat[1].length);
         }
-        remainingStr = remainingStr.replace(regex, ' ');
-      }
-    });
+      });
 
-    // 4. 提取生肖 (含谐音)
-    const flatVariations: { v: string, real: string }[] = [];
-    Object.entries(ZODIAC_HOMOPHONES).forEach(([realZodiac, variations]) => {
-      variations.forEach(v => flatVariations.push({ v, real: realZodiac }));
-    });
-    flatVariations.sort((a, b) => b.v.length - a.v.length);
-
-    flatVariations.forEach(({ v, real }) => {
-      const regex = new RegExp(v, 'g');
-      const count = (remainingStr.match(regex) || []).length;
-      if (count > 0) {
-        const zodiacNumbers = getNumbersByZodiac(real);
-        for (let i = 0; i < count; i++) {
-          allNumbers.push(...zodiacNumbers);
+      // 复用之前的组合/生肖/数字逻辑
+      sortedCombos.forEach(combo => {
+        let idx = workingWord.indexOf(combo.key);
+        while (idx !== -1) {
+          const comboNumbers: number[] = [];
+          for (let n = 1; n <= 49; n++) if (combo.filter(n)) comboNumbers.push(n);
+          localTokens.push({ text: combo.key, index: idx, nums: comboNumbers });
+          workingWord = workingWord.substring(0, idx) + ' '.repeat(combo.key.length) + workingWord.substring(idx + combo.key.length);
+          idx = workingWord.indexOf(combo.key);
         }
-        remainingStr = remainingStr.replace(regex, ' ');
-      }
-    });
+      });
 
-    // 5. 提取独立数字 (使用排除后的剩余字符串)
-    const cleanNums = remainingStr.replace(/[^\d]/g, ' ');
-    const numMatches = cleanNums.match(/\d+/g);
-    if (numMatches) {
-      numMatches.forEach(nStr => {
-        let nums: number[] = [];
-        if (nStr.length <= 2) {
-          const n = parseInt(nStr, 10);
-          if (n >= 1 && n <= 49) {
-            nums.push(n);
-          } else if (n === 0) {
-            for (let j = 1; j <= 49; j++) {
-              if (j % 10 === 0) nums.push(j);
-            }
-          }
+      const flatZodiacs: { v: string, real: string }[] = [];
+      Object.entries(ZODIAC_HOMOPHONES).forEach(([real, vari]) => vari.forEach(v => flatZodiacs.push({ v, real })));
+      flatZodiacs.sort((a, b) => b.v.length - a.v.length).forEach(({ v, real }) => {
+        let idx = workingWord.indexOf(v);
+        while (idx !== -1) {
+          localTokens.push({ text: real, index: idx, nums: getNumbersByZodiac(real) });
+          workingWord = workingWord.substring(0, idx) + ' '.repeat(v.length) + workingWord.substring(idx + v.length);
+          idx = workingWord.indexOf(v);
+        }
+      });
+
+      let nMatch;
+      const nRegex = /\d+/g;
+      while ((nMatch = nRegex.exec(workingWord)) !== null) {
+        let nNums: number[] = [];
+        if (nMatch[0].length <= 2) {
+          const n = parseInt(nMatch[0], 10);
+          if (n >= 1 && n <= 49) nNums.push(n);
         } else {
-          nums = smartSplitDigits(nStr);
+          nNums = smartSplitDigits(nMatch[0]);
         }
+        if (nNums.length > 0) localTokens.push({ text: nMatch[0], index: nMatch.index, nums: nNums });
+      }
 
-        if (nums.length > 0) {
-          allNumbers.push(...nums);
-        }
-      });
-    }
+      if (localTokens.length > 0) {
+        localTokens.sort((a, b) => a.index - b.index);
+        localTokens.forEach(t => {
+          allNumbersFromSegments.push(...t.nums);
+          let txt = t.text;
+          if (/^\d{1,2}$/.test(txt)) {
+            const v = parseInt(txt, 10);
+            if (v >= 1 && v <= 49) txt = txt.padStart(2, '0');
+          }
+          rawTokens.push(txt);
+        });
+      }
+    });
 
-    if (allNumbers.length > 0) {
-      // "包" 关键字逻辑：平分金额
+    if (allNumbersFromSegments.length > 0) {
+      // 备注：不执行最终去重，尊重并集下注目标累加逻辑 (如 "红双 小" -> 9 + 24 = 33)
+      const finalNumbers = allNumbersFromSegments; 
       const isSplitAmount = bestMatch && bestMatch.keyword === '包';
-      const finalAmount = isSplitAmount ? (amount / allNumbers.length) : amount;
+      const finalAmount = isSplitAmount ? (amount / finalNumbers.length) : amount;
 
-      results.push({
-        numbers: allNumbers,
+      // 规范化显示：红/蓝/绿 -> 红波/蓝波/绿波
+      const normalizedRaw = rawTokens.map(t => {
+        if (t === '红' || t === '蓝' || t === '绿') return t + '波';
+        return t;
+      }).join(' ');
+
+      return [{
+        numbers: finalNumbers,
         amount: finalAmount,
-        raw: displayRaw,
+        raw: normalizedRaw,
         type: comboType
-      });
+      }];
     }
 
     return results.length > 0 ? results : null;

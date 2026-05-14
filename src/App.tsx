@@ -90,6 +90,7 @@ export default function App() {
     const sharedKeys = [
       'local_customers', 'enableSearchUndo', 'requireUndoConfirm', 
       'requireUndoPasteConfirm', 'autoPasteEnabled', 'followCustomerRisk',
+      'enableCustomerEatingReport', 'smartSystemRecognition',
       'auxSpecialNumber', 'specialNumber', 'auxSpecialNumberInput', 'specialNumberInput',
       'riskNumbers', 'LOTTERY_EXTERNAL_SUBMIT', 'LOTTERY_UNDO_REQUEST', 'LOTTERY_RESET_REQUEST'
     ];
@@ -153,7 +154,8 @@ export default function App() {
   const [settingsMode] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      return params.get('mode') === 'settings';
+      // 同时兼容 mode=settings 和 settings=true
+      return params.get('mode') === 'settings' || params.get('settings') === 'true';
     }
     return false;
   });
@@ -292,41 +294,43 @@ export default function App() {
     return saved === 'true';
   });
 
-  // Listen for settings update from other windows (Electron)
   useEffect(() => {
     if (window.electron) {
-      const removeListener = window.electron.on('settings-updated-trigger', () => {
+      const removeSettingsListener = window.electron.on('settings-updated-trigger', () => {
+        console.log('检测到全局设置更新，正在刷新主进程状态...');
         // Refresh local state from localStorage
         const oddsKey = systemType === 'MO' ? 'MO_odds' : 'odds';
         const rebateKey = systemType === 'MO' ? 'MO_rebate' : 'rebate';
         
         const savedOdds = localStorage.getItem(oddsKey);
         const savedRebate = localStorage.getItem(rebateKey);
-        const savedSearchUndo = localStorage.getItem('enableSearchUndo');
-        const savedSmartRecognition = localStorage.getItem('smartSystemRecognition');
-        const savedUndoConfirm = localStorage.getItem('requireUndoConfirm');
-        const savedUndoPasteConfirm = localStorage.getItem('requireUndoPasteConfirm');
-        const savedAutoPaste = localStorage.getItem('autoPasteEnabled');
         const savedFollowRisk = localStorage.getItem('followCustomerRisk');
         const savedEatingReport = localStorage.getItem('enableCustomerEatingReport');
-        const savedCompactMode = localStorage.getItem('isCompactMode');
-
-        if (savedOdds) setOdds(parseFloat(savedOdds));
-        if (savedRebate) setRebate(parseFloat(savedRebate));
-        if (savedSearchUndo) setEnableSearchUndo(savedSearchUndo === 'true');
-        if (savedSmartRecognition) setSmartSystemRecognition(savedSmartRecognition === 'true');
-        if (savedUndoConfirm) setRequireUndoConfirm(savedUndoConfirm === 'true');
-        if (savedUndoPasteConfirm) setRequireUndoPasteConfirm(savedUndoPasteConfirm === 'true');
-        if (savedAutoPaste) setAutoPasteEnabled(savedAutoPaste === 'true');
+        
+        if (savedOdds) setOdds(parseFloat(savedOdds || (systemType === 'MO' ? '48.5' : '48.5')));
+        if (savedRebate) setRebate(parseFloat(savedRebate || '10'));
         if (savedFollowRisk) setFollowCustomerRisk(savedFollowRisk === 'true');
         if (savedEatingReport) setEnableCustomerEatingReport(savedEatingReport === 'true');
-        if (savedCompactMode) setIsCompactMode(savedCompactMode === 'true');
+        
+        // 强制刷新其他非敏感设置
+        ['enableSearchUndo', 'smartSystemRecognition', 'requireUndoConfirm', 'requireUndoPasteConfirm', 'autoPasteEnabled', 'isCompactMode'].forEach(k => {
+          const v = localStorage.getItem(k);
+          if (v !== null) {
+            const bv = v === 'true';
+            if (k === 'enableSearchUndo') setEnableSearchUndo(bv);
+            if (k === 'smartSystemRecognition') setSmartSystemRecognition(bv);
+            if (k === 'requireUndoConfirm') setRequireUndoConfirm(bv);
+            if (k === 'requireUndoPasteConfirm') setRequireUndoPasteConfirm(bv);
+            if (k === 'autoPasteEnabled') setAutoPasteEnabled(bv);
+            if (k === 'isCompactMode') setIsCompactMode(bv);
+          }
+        });
       });
       return () => {
-        if (removeListener) removeListener();
+        if (removeSettingsListener) removeSettingsListener();
       };
     }
-  }, [systemType, getSysKey]);
+  }, [systemType]);
 
   const [customWidth, setCustomWidth] = useState(() => {
     const saved = localStorage.getItem('customWidth');
@@ -448,7 +452,7 @@ export default function App() {
 
   // Local Customer Management State
   const [customers, setCustomers] = useState<{id: string, name: string, createdAt: string}[]>(() => {
-    const key = getSysKey('local_customers');
+    const key = 'local_customers';
     const saved = localStorage.getItem(key);
     const initial = saved ? JSON.parse(saved) : [{ id: 'default', name: '汇总', createdAt: new Date().toISOString() }];
     // Ensure default name is '汇总' for summary feature
@@ -513,13 +517,13 @@ export default function App() {
   // Sync customers and coefficients across windows (for standalone pop-out)
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
-      const custKey = getSysKey('local_customers');
+      const custKey = 'local_customers';
       if (e.key === custKey && e.newValue) {
         const updated = JSON.parse(e.newValue);
         setCustomers(updated.map((c: any) => c.id === 'default' ? { ...c, name: '汇总' } : c));
       }
       
-      if (e.key && e.key === getSysKey(`coefficient_${selectedCustomerId}`)) {
+      if (e.key && e.key === `coefficient_${selectedCustomerId}`) {
         if (e.newValue) {
           setCurrentCoefficient(parseFloat(e.newValue));
         }
@@ -544,18 +548,18 @@ export default function App() {
     if (selectedCustomerId === 'default') {
       setCurrentCoefficient(1.0);
     } else {
-      const key = getSysKey(`coefficient_${selectedCustomerId}`);
+      const key = `coefficient_${selectedCustomerId}`;
       const saved = localStorage.getItem(key);
       setCurrentCoefficient(saved ? parseFloat(saved) : 1.0);
     }
-  }, [selectedCustomerId, getSysKey, systemType]);
+  }, [selectedCustomerId]);
 
   const handleSaveFormulaCoefficient = () => {
     let val = parseInt(tempCoefficient);
     if (isNaN(val)) val = 100;
     val = Math.max(1, Math.min(100, val));
     const decimalVal = val / 100;
-    localStorage.setItem(getSysKey(`coefficient_${formulaTargetId}`), decimalVal.toFixed(2));
+    localStorage.setItem(`coefficient_${formulaTargetId}`, decimalVal.toFixed(2));
     setRefreshCounter(prev => prev + 1);
     setIsFormulaModalOpen(false);
     
@@ -815,7 +819,9 @@ export default function App() {
           const total = displayBetData[num] || 0;
           const currentEaten = eatenAmounts[num] || 0;
           const currentField = Math.max(0, total - currentEaten);
-          const suggestedNewReport = currentField * reportRatio;
+          // 百分比吃码计算四舍五入的应该是新上报的部分 (suggestedNewReport)
+          const suggestedNewReport = Math.round(currentField * reportRatio);
+          // 确保 汇总数(Kept) = 总额 - 上报额 这一逻辑链条在此时就固定，避免双重舍入误差
           return [num, currentEaten + suggestedNewReport];
         })
       );
@@ -1220,6 +1226,11 @@ export default function App() {
         if (e.key === getSysKey('requireUndoPasteConfirm')) setRequireUndoPasteConfirm(e.newValue === 'true');
         if (e.key === getSysKey('autoPasteEnabled')) setAutoPasteEnabled(e.newValue !== 'false');
         if (e.key === getSysKey('riskNumbers')) setRiskNumbers(JSON.parse(e.newValue || '[]'));
+        if (e.key === getSysKey('followCustomerRisk')) setFollowCustomerRisk(e.newValue === 'true');
+        if (e.key === getSysKey('enableCustomerEatingReport')) setEnableCustomerEatingReport(e.newValue === 'true');
+        if (e.key === 'isCompactMode') setIsCompactMode(e.newValue === 'true');
+        if (e.key === 'customWidth') setCustomWidth(parseInt(e.newValue || '1420'));
+        if (e.key === 'customHeight') setCustomHeight(parseInt(e.newValue || '903'));
         
         // Listen for any customer state changes to refresh aggregate view in Summary Mode
         if (selectedCustomerId === 'default' && e.key.startsWith(getSysKey('customer_state_'))) {
@@ -1459,7 +1470,7 @@ export default function App() {
         if (saved) {
           const data = JSON.parse(saved);
           if (c.id !== 'default') {
-            const coeffKey = getSysKey(`coefficient_${c.id}`);
+            const coeffKey = `coefficient_${c.id}`;
             const unPrefixedCoeffKey = `coefficient_${c.id}`;
             const coeffSaved = localStorage.getItem(coeffKey) || localStorage.getItem(unPrefixedCoeffKey);
             const coeff = coeffSaved ? parseFloat(coeffSaved) : 1.0;
@@ -1584,8 +1595,8 @@ export default function App() {
 
   // Persist customer list
   useEffect(() => {
-    localStorage.setItem(getSysKey('local_customers'), JSON.stringify(customers));
-  }, [customers, getSysKey]);
+    localStorage.setItem('local_customers', JSON.stringify(customers));
+  }, [customers]);
 
   useEffect(() => {
     localStorage.setItem(getSysKey('riskNumbers'), JSON.stringify(riskNumbers));
@@ -1741,7 +1752,7 @@ export default function App() {
     if (isNaN(coeff)) coeff = 100;
     coeff = Math.max(1, Math.min(100, coeff));
     const decimalCoeff = coeff / 100;
-    localStorage.setItem(getSysKey(`coefficient_${newId}`), decimalCoeff.toFixed(2));
+    localStorage.setItem(`coefficient_${newId}`, decimalCoeff.toFixed(2));
 
     setCustomers(prev => [...prev, newCust]);
     setSelectedCustomerId(newId);
@@ -3172,6 +3183,20 @@ export default function App() {
               </button>
             </div>
 
+            <div className={`flex items-center justify-between transition-opacity ${!tempFollowCustomerRisk ? 'opacity-30' : ''}`}>
+              <div>
+                <label className="text-xs font-mono font-bold uppercase tracking-widest block">开启客户页吃码上报</label>
+                <p className="text-[10px] font-mono opacity-40">不再强制切换到汇总模式。</p>
+              </div>
+              <button 
+                onClick={() => tempFollowCustomerRisk && setTempEnableCustomerEatingReport(!tempEnableCustomerEatingReport)}
+                disabled={!tempFollowCustomerRisk}
+                className={`w-10 h-5 rounded-full transition-colors relative ${tempEnableCustomerEatingReport ? 'bg-indigo-600' : 'bg-gray-300'} ${!tempFollowCustomerRisk ? 'cursor-not-allowed' : ''}`}
+              >
+                <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempEnableCustomerEatingReport ? 'left-6' : 'left-1'}`} />
+              </button>
+            </div>
+
             <div className="flex items-center justify-between">
               <div>
                 <label className="text-xs font-mono font-bold uppercase tracking-widest block">开启撤销并粘贴确认弹窗</label>
@@ -3258,18 +3283,15 @@ export default function App() {
               setEnableCustomerEatingReport(tempEnableCustomerEatingReport);
               
               // Physical Sync to localStorage
-              const oddsKey = systemType === 'MO' ? 'MO_odds' : 'odds';
-              const rebateKey = systemType === 'MO' ? 'MO_rebate' : 'rebate';
-              
-              localStorage.setItem(oddsKey, tempOdds.toString());
-              localStorage.setItem(rebateKey, tempRebate.toString());
-              localStorage.setItem('enableSearchUndo', tempEnableSearchUndo.toString());
-              localStorage.setItem('smartSystemRecognition', tempSmartSystemRecognition.toString());
-              localStorage.setItem('requireUndoConfirm', tempRequireUndoConfirm.toString());
-              localStorage.setItem('requireUndoPasteConfirm', tempRequireUndoPasteConfirm.toString());
-              localStorage.setItem('autoPasteEnabled', tempAutoPasteEnabled.toString());
-              localStorage.setItem('followCustomerRisk', tempFollowCustomerRisk.toString());
-              localStorage.setItem('enableCustomerEatingReport', tempEnableCustomerEatingReport.toString());
+              localStorage.setItem(getSysKey('odds'), tempOdds.toString());
+              localStorage.setItem(getSysKey('rebate'), tempRebate.toString());
+              localStorage.setItem(getSysKey('enableSearchUndo'), tempEnableSearchUndo.toString());
+              localStorage.setItem(getSysKey('smartSystemRecognition'), tempSmartSystemRecognition.toString());
+              localStorage.setItem(getSysKey('requireUndoConfirm'), tempRequireUndoConfirm.toString());
+              localStorage.setItem(getSysKey('requireUndoPasteConfirm'), tempRequireUndoPasteConfirm.toString());
+              localStorage.setItem(getSysKey('autoPasteEnabled'), tempAutoPasteEnabled.toString());
+              localStorage.setItem(getSysKey('followCustomerRisk'), tempFollowCustomerRisk.toString());
+              localStorage.setItem(getSysKey('enableCustomerEatingReport'), tempEnableCustomerEatingReport.toString());
               localStorage.setItem('isCompactMode', tempCompactMode.toString());
               localStorage.setItem('customWidth', tempWidth.toString());
               localStorage.setItem('customHeight', tempHeight.toString());
@@ -3471,7 +3493,7 @@ export default function App() {
         if (saved) {
           const data = JSON.parse(saved);
           if (data.financeBetData && c.id !== 'default') { // 不要重复统计汇总页自身的 betData（如果有的话）
-            const coeffSaved = localStorage.getItem(getSysKey(`coefficient_${c.id}`));
+            const coeffSaved = localStorage.getItem(`coefficient_${c.id}`);
             const coeff = coeffSaved ? parseFloat(coeffSaved) : 1.0;
             Object.entries(data.financeBetData).forEach(([num, val]) => {
               const n = parseInt(num);
@@ -3765,7 +3787,7 @@ export default function App() {
                                           const firstRealCustomer = customers.find(c => c.id !== 'default');
                                           const targetId = selectedCustomerId === 'default' ? (firstRealCustomer?.id || 'default') : selectedCustomerId;
                                           setFormulaTargetId(targetId);
-                                          const saved = localStorage.getItem(getSysKey(`coefficient_${targetId}`));
+                                          const saved = localStorage.getItem(`coefficient_${targetId}`);
                                           const val = saved ? parseFloat(saved) : 1.0;
                                           setTempCoefficient(Math.round(val * 100).toString());
                                         }}
@@ -3791,6 +3813,20 @@ export default function App() {
                       </div>
 
                       <div className="flex items-center gap-4">
+                        {(enableCustomerEatingReport || isCompactMode) && (
+                          <button 
+                            onClick={() => {
+                              setActiveView('eating');
+                              if (!enableCustomerEatingReport) {
+                                setSelectedCustomerId('default');
+                              }
+                            }}
+                            className="flex items-center gap-1.5 px-2 py-1 bg-blue-600 text-white text-[10px] font-mono hover:bg-blue-700 transition-all rounded shadow-[2px_2px_0_0_#141414] active:translate-y-0.5"
+                          >
+                            <Upload size={12} />
+                            吃码上报
+                          </button>
+                        )}
                         <button 
                           id="copy-data-btn"
                           onClick={handleCopyData}
@@ -4297,6 +4333,7 @@ export default function App() {
                           
                           // "汇总数" follow-up: If preview is on, show what would remain (Total - Predicted Total Report)
                           // If preview is off, show current status (Total - Already Reported)
+                          // 根据用户要求，汇总数应严格遵循： 总额 - 四舍五入后的上报额
                           const currentDisplayedKept = amountRaw > 0 ? (amountRaw - (showEatingPreview ? toReportTotal : alreadyReported)) : 0;
                           
                           return (
@@ -5210,7 +5247,7 @@ export default function App() {
                     onChange={(e) => {
                       const newId = e.target.value;
                       setFormulaTargetId(newId);
-                      const saved = localStorage.getItem(getSysKey(`coefficient_${newId}`));
+                      const saved = localStorage.getItem(`coefficient_${newId}`);
                       const val = saved ? parseFloat(saved) : 1.0;
                       setTempCoefficient(Math.round(val * 100).toString());
                     }}
@@ -5241,7 +5278,7 @@ export default function App() {
                       }}
                       onBlur={() => {
                         if (tempCoefficient === '') {
-                          const saved = localStorage.getItem(getSysKey(`coefficient_${formulaTargetId}`));
+                          const saved = localStorage.getItem(`coefficient_${formulaTargetId}`);
                           const val = saved ? parseFloat(saved) : 1.0;
                           setTempCoefficient(Math.round(val * 100).toString());
                         }
