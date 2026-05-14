@@ -1008,6 +1008,10 @@ export default function App() {
       // 汇总模式下强制刷新
       if (selectedCustomerId === 'default') {
         setRefreshCounter(prev => prev + 1);
+        // 同时立即同步内存中的缩放数据，防止异步延迟导致的闪烁
+        const emptyScaled: Record<number, number> = {};
+        for (let i = 1; i <= 49; i++) emptyScaled[i] = 0;
+        setScaledBetData(emptyScaled);
       }
     } else {
       // 原有的单客户重置逻辑
@@ -2389,18 +2393,22 @@ export default function App() {
       }
 
       const performClearAndPaste = async () => {
+        // 逻辑增强：在执行任何异步操作前，先从 React 状态中获取最新的客户列表，不依赖闭包
+        const currentCustomers = customers;
+
         // 1. 发送全局重置信号 (支持跨窗口/Electron)
-        if (standaloneMode) {
-          const signal = { keepRisk: true, keepSpecial: true, isGlobal: true, timestamp: Date.now() };
-          if (window.electron) window.electron.send('reset-entry', signal);
-          else localStorage.setItem(getSysKey('LOTTERY_RESET_REQUEST'), JSON.stringify(signal));
+        const signal = { keepRisk: true, keepSpecial: true, isGlobal: true, timestamp: Date.now() };
+        if (window.electron) window.electron.send('reset-entry', signal);
+        else {
+          localStorage.removeItem(getSysKey('LOTTERY_RESET_REQUEST'));
+          localStorage.setItem(getSysKey('LOTTERY_RESET_REQUEST'), JSON.stringify(signal));
         }
         
-        // 2. 彻底执行全局重置 (内部已涵盖所有客户和全局状态)
+        // 2. 执行内存重置 (立即响应)
         handleReset(true, true, undefined, true);
         
-        // 3. 额外保险：直接物理抹除所有顶级系统的存储键，确保没有任何“回滚”可能
-        const sysPrefixes = ['', 'MO_', 'HK_'];
+        // 3. 地毯式物理抹除 (覆盖所有可能系统前缀)
+        const sysPrefixes = ['', 'MO_'];
         sysPrefixes.forEach(p => {
           localStorage.setItem(`${p}eatenAmounts`, JSON.stringify({}));
           localStorage.setItem(`${p}eatingHistory`, JSON.stringify([]));
@@ -2409,8 +2417,8 @@ export default function App() {
           localStorage.setItem(`${p}compoundRecords`, JSON.stringify([]));
         });
 
-        // 4. 对所有客户状态进行地毯式清理 (包括汇总 default 键)
-        customers.forEach(ps => {
+        // 4. 对所有已知客户执行状态清理
+        currentCustomers.forEach(ps => {
           sysPrefixes.forEach(p => {
              const key = `customer_state_${ps.id}`;
              const prefixedKey = p + key;
@@ -2426,10 +2434,10 @@ export default function App() {
           });
         });
         
-        // 同步通知更新
+        // 强制触发全局刷新
         setRefreshCounter(prev => prev + 1);
         
-        // 5. 填充粘贴内容
+        // 5. 反馈并粘贴
         setModalInputValue(text);
         setLocalModalValue(text);
       };
@@ -2437,18 +2445,21 @@ export default function App() {
       if (requireUndoPasteConfirm) {
         setUndoCallback({ 
           fn: performClearAndPaste, 
-          label: "确定清空当前流水数据并粘贴新内容？" 
+          label: "注意：点击确认将【永久删除】港澳双系统、所有客户的所有下注及流水数据，是否继续？" 
         });
         setShowLastUndoConfirm(true);
       } else {
         await performClearAndPaste();
       }
     } catch (err) {
-      console.error('Clipboard read error:', err);
-      // Fallback: 如果直接读失败（比如权限），尝试进入常规 handlePasteAndRecognize 流程
-      await handlePasteAndRecognize(true);
+      console.error('Clipboard read error in triggerClearAndPaste:', err);
+      // 如果权限受阻且必须重置，则先尝试执行清理，再弹权限错误
+      setError('清空并粘贴失败: 无法访问剪贴板，请检查权限。数据已尝试清空。');
+      setTimeout(() => setError(null), 3000);
+      // 仍然执行清理逻辑（不带粘贴内容）
+      handleReset(true, true, undefined, true);
     }
-  }, [handlePasteAndRecognize, handleReset, handleResetEaten, requireUndoPasteConfirm, standaloneMode, getSysKey]);
+  }, [handlePasteAndRecognize, handleReset, handleResetEaten, requireUndoPasteConfirm, standaloneMode, getSysKey, customers, setRefreshCounter, setModalInputValue, setLocalModalValue, setUndoCallback, setShowLastUndoConfirm]);
 
   const handlePopOut = useCallback(() => {
     console.log('触发 handlePopOut, mode:', modalMode);

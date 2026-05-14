@@ -353,7 +353,8 @@ function expandHeadTail(text: string): string {
               if (p.endsWith(' ') || p.endsWith('\t') || p.endsWith('　')) {
                 shouldExpand = isSingleDigit;
               } else {
-                shouldExpand = true;
+                // 修复：补零的双位数（如 01-09）绝对不应展开为尾数
+                shouldExpand = part.length > 1 ? !part.startsWith('0') : true;
               }
             } else {
               shouldExpand = isSingleDigit;
@@ -419,7 +420,8 @@ function expandHeadTail(text: string): string {
               if (p.startsWith(' ') || p.startsWith('\t') || p.startsWith('　')) {
                 shouldExpand = (part.length === 1);
               } else {
-                shouldExpand = true;
+                // 修复：补零的双位数（如 01-09）绝对不应展开为头数
+                shouldExpand = part.length > 1 ? !part.startsWith('0') : true;
               }
             } else {
               shouldExpand = (part.length === 1);
