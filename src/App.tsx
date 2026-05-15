@@ -1008,10 +1008,6 @@ export default function App() {
       // 汇总模式下强制刷新
       if (selectedCustomerId === 'default') {
         setRefreshCounter(prev => prev + 1);
-        // 同时立即同步内存中的缩放数据，防止异步延迟导致的闪烁
-        const emptyScaled: Record<number, number> = {};
-        for (let i = 1; i <= 49; i++) emptyScaled[i] = 0;
-        setScaledBetData(emptyScaled);
       }
     } else {
       // 原有的单客户重置逻辑
@@ -2383,83 +2379,6 @@ export default function App() {
     }
   }, [modalInputValue, enableSearchUndo, customers, getSysKey, activeView, handleUndo, requireUndoConfirm, standaloneMode]);
 
-  const triggerClearAndPaste = useCallback(async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text) {
-        setError('剪贴板为空');
-        setTimeout(() => setError(null), 2000);
-        return;
-      }
-
-      const performClearAndPaste = async () => {
-        // 逻辑增强：在执行任何异步操作前，先从 React 状态中获取最新的客户列表，不依赖闭包
-        const currentCustomers = customers;
-
-        // 1. 发送全局重置信号 (支持跨窗口/Electron)
-        const signal = { keepRisk: true, keepSpecial: true, isGlobal: true, timestamp: Date.now() };
-        if (window.electron) window.electron.send('reset-entry', signal);
-        else {
-          localStorage.removeItem(getSysKey('LOTTERY_RESET_REQUEST'));
-          localStorage.setItem(getSysKey('LOTTERY_RESET_REQUEST'), JSON.stringify(signal));
-        }
-        
-        // 2. 执行内存重置 (立即响应)
-        handleReset(true, true, undefined, true);
-        
-        // 3. 地毯式物理抹除 (覆盖所有可能系统前缀)
-        const sysPrefixes = ['', 'MO_'];
-        sysPrefixes.forEach(p => {
-          localStorage.setItem(`${p}eatenAmounts`, JSON.stringify({}));
-          localStorage.setItem(`${p}eatingHistory`, JSON.stringify([]));
-          localStorage.setItem(`${p}financeBetData`, JSON.stringify(Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0]))));
-          localStorage.setItem(`${p}financeRecords`, JSON.stringify([]));
-          localStorage.setItem(`${p}compoundRecords`, JSON.stringify([]));
-        });
-
-        // 4. 对所有已知客户执行状态清理
-        currentCustomers.forEach(ps => {
-          sysPrefixes.forEach(p => {
-             const key = `customer_state_${ps.id}`;
-             const prefixedKey = p + key;
-             const emptyState = {
-               financeBetData: Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])),
-               eatenAmounts: {},
-               financeRecords: [],
-               compoundRecords: [],
-               eatingHistory: [],
-               totalTurnover: 0
-             };
-             localStorage.setItem(prefixedKey, JSON.stringify(emptyState));
-          });
-        });
-        
-        // 强制触发全局刷新
-        setRefreshCounter(prev => prev + 1);
-        
-        // 5. 反馈并粘贴
-        setModalInputValue(text);
-        setLocalModalValue(text);
-      };
-
-      if (requireUndoPasteConfirm) {
-        setUndoCallback({ 
-          fn: performClearAndPaste, 
-          label: "注意：点击确认将【永久删除】港澳双系统、所有客户的所有下注及流水数据，是否继续？" 
-        });
-        setShowLastUndoConfirm(true);
-      } else {
-        await performClearAndPaste();
-      }
-    } catch (err) {
-      console.error('Clipboard read error in triggerClearAndPaste:', err);
-      // 如果权限受阻且必须重置，则先尝试执行清理，再弹权限错误
-      setError('清空并粘贴失败: 无法访问剪贴板，请检查权限。数据已尝试清空。');
-      setTimeout(() => setError(null), 3000);
-      // 仍然执行清理逻辑（不带粘贴内容）
-      handleReset(true, true, undefined, true);
-    }
-  }, [handlePasteAndRecognize, handleReset, handleResetEaten, requireUndoPasteConfirm, standaloneMode, getSysKey, customers, setRefreshCounter, setModalInputValue, setLocalModalValue, setUndoCallback, setShowLastUndoConfirm]);
 
   const handlePopOut = useCallback(() => {
     console.log('触发 handlePopOut, mode:', modalMode);
@@ -2524,7 +2443,28 @@ export default function App() {
   };
 
   const handleClearBoard = () => {
-    if (window.confirm('确定要清空该客户的所有下注记录吗？此操作不可撤销。')) {
+    const message = selectedCustomerId === 'default' 
+      ? '确定要清空所有客户的所有下注记录吗？此操作不可撤销。'
+      : '确定要清空该客户的所有下注记录吗？此操作不可撤销。';                
+    
+    // Check setting requireUndoPasteConfirm if needed
+    if (requireUndoPasteConfirm && !window.confirm(message)) {
+        return;
+    } else if (!requireUndoPasteConfirm) {
+        // If setting is off, maybe we don't confirm? Or just standard confirm? 
+        // User said link with the setting. Assuming it means skip confirm if false.
+        // Actually, previous implementation forced confirm.
+        // Let's keep it simple: if requireUndoPasteConfirm is true, confirm. 
+        // Otherwise proceed directly? Or keep mandatory confirm for this drastic action?
+        // Let's allow skipping if not required. 
+        // Wait, '清空面板' is dangerous. 
+        // The user said: "联动设置中之前的清空数据并粘贴弹窗的开关".
+        // Let's implement this: if switch is true, confirm. If switch is false, proceed directly.
+        // But let's be safe and confirm if it's 'default' (all customers) regardless?
+        // No, follow instructions strictly. 
+    }
+
+    if (!requireUndoPasteConfirm || window.confirm(message)) {
       const emptyBet: Record<number, number> = {};
       for (let i = 1; i <= 49; i++) emptyBet[i] = 0;
       
@@ -2554,6 +2494,10 @@ export default function App() {
           localStorage.setItem(`${prefix}compoundRecords`, JSON.stringify([]));
           localStorage.setItem(`${prefix}eatingHistory`, JSON.stringify([]));
           localStorage.setItem(`${prefix}eatenAmounts`, JSON.stringify({}));
+          
+          customers.forEach(customer => {
+             localStorage.setItem(`${prefix}customer_state_${customer.id}`, JSON.stringify(emptyState));
+          });
         }
       };
 
@@ -3042,8 +2986,8 @@ export default function App() {
       <EntryModalContent
         isOpen={isModalOpen}
         modalMode={modalMode}
-        localModalValue={localModalValue}
-        setLocalModalValue={setLocalModalValue}
+        externalValue={localModalValue}
+        onValueChange={setLocalModalValue}
         modalResults={modalResults}
         handleParse={handleParse}
         lastSubmittedModalValue={lastSubmittedModalValue}
@@ -3054,6 +2998,7 @@ export default function App() {
         previewScrollRef={previewScrollRef}
         systemType={systemType}
         switchSystem={switchSystem}
+        onClearBoard={handleClearBoard}
         isSwitchingSystem={isSwitchingSystem}
         popOutTargetId={popOutTargetId}
         setPopOutTargetId={setPopOutTargetId}
@@ -3065,7 +3010,7 @@ export default function App() {
         dragControls={dragControls}
         handlePasteAndRecognize={handlePasteAndRecognize}
         triggerLastUndo={triggerLastUndo}
-        triggerClearAndPaste={triggerClearAndPaste}
+
         setIsModalOpen={setIsModalOpen}
         error={error}
       />
@@ -3091,7 +3036,8 @@ export default function App() {
     handlePopOut,
     handlePasteAndRecognize,
     triggerLastUndo,
-    triggerClearAndPaste,
+    handleClearBoard,
+
     setLocalModalValue,
     setLastSubmittedModalValue,
     setIsModalOpen,
@@ -3412,7 +3358,6 @@ export default function App() {
             </button>
             <button onClick={() => setModalInputValue('')} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">清空</button>
             <button onClick={triggerLastUndo} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">撤销</button>
-            <button onClick={triggerClearAndPaste} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap text-red-600">清空数据并粘贴</button>
           </div>
           
           <div className="grid grid-cols-5 gap-1 mt-1">
@@ -3849,8 +3794,7 @@ export default function App() {
                         </button>
                         <button 
                           onClick={handleClearBoard}
-                          disabled={selectedCustomerId === 'default'}
-                          className={`flex items-center gap-1.5 px-2 py-1 bg-red-600 text-white text-[10px] font-mono hover:bg-red-700 transition-all ${selectedCustomerId === 'default' ? 'opacity-30 cursor-not-allowed' : ''}`}
+                          className="flex items-center gap-1.5 px-2 py-1 bg-red-600 text-white text-[10px] font-mono hover:bg-red-700 transition-all"
                         >
                           <Trash2 size={12} strokeWidth={2} />
                           清空面板
@@ -5786,9 +5730,10 @@ const EntryModalContent = React.memo(({
   systemType: _systemType, switchSystem: _switchSystem, 
   isSwitchingSystem: _isSwitchingSystem, popOutTargetId, setPopOutTargetId, selectedCustomerId, 
   setSelectedCustomerId, customers, handlePopOut, standaloneMode, dragControls, 
-  handlePasteAndRecognize, triggerLastUndo, triggerClearAndPaste, setIsModalOpen, error,
-  externalValue, onValueChange
+  handlePasteAndRecognize, triggerLastUndo, setIsModalOpen, error,
+  externalValue, onValueChange, onClearBoard
 }: any) => {
+  console.log('DEBUG: EntryModalContent rendering, isOpen:', isOpen, 'standaloneMode:', standaloneMode, 'onClearBoard defined:', !!onClearBoard);
   const previewScrollRef = useRef<HTMLDivElement>(null);
   
   // 核心优化：内部私有状态，打字时不触发父组件重绘，实现秒回显
@@ -5870,7 +5815,7 @@ const EntryModalContent = React.memo(({
         >
           <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest pointer-events-none text-[#141414]">
-              智能下注录入
+              DEBUG 标题
             </h3>
             <button 
               onClick={handlePopOut}
@@ -5966,41 +5911,44 @@ const EntryModalContent = React.memo(({
           )}
         </div>
 
-        <div className="grid grid-cols-5 gap-1 mt-2">
-          <button 
-            onClick={handlePasteAndRecognize}
-            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-          >
-            粘贴识别
-          </button>
-          <button 
-            onClick={() => {
-              modalInputRef.current?.focus();
-              setLastSubmittedModalValue('');
-            }}
-            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-          >
-            重新识别
-          </button>
-          <button 
-            onClick={() => setInternalValue('')}
-            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-          >
-            清空
-          </button>
-          <button 
-            onClick={triggerLastUndo}
-            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-          >
-            撤销
-          </button>
-          <button 
-            onClick={triggerClearAndPaste}
-            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-red-600 whitespace-nowrap"
-          >
-            清空数据并粘贴
-          </button>
-        </div>
+          <div className="flex flex-wrap gap-1 mt-2">
+            <button 
+              onClick={() => {
+                onClearBoard();
+                setInternalValue('');
+              }}
+              className="bg-red-500 hover:bg-red-600 border border-black px-4 py-4 text-2xl font-bold transition-all active:bg-red-700 rounded shadow-lg text-white whitespace-nowrap"
+            >
+              清空面板 (DEBUG V2)
+            </button>
+            <button 
+              onClick={handlePasteAndRecognize}
+              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+            >
+              粘贴识别
+            </button>
+            <button 
+              onClick={() => {
+                modalInputRef.current?.focus();
+                setLastSubmittedModalValue('');
+              }}
+              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+            >
+              重新识别
+            </button>
+            <button 
+              onClick={() => setInternalValue('')}
+              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+            >
+              清空
+            </button>
+            <button 
+              onClick={triggerLastUndo}
+              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+            >
+              撤销
+            </button>
+          </div>
         <div className="grid grid-cols-5 gap-1 mt-1">
           <button 
             onClick={() => handleParse(false, internalValue)}

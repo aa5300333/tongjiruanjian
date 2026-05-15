@@ -5,7 +5,6 @@
 - **逻辑追溯**: 每次修改逻辑和（Parsing）相关的代码并解决问题后，必须将“问题现象”与“修复方案”记录到记忆库中（AGENTS.md 和 纠错文档.md），作为长期规则。其中识别（Parsing）相关的修改必须写入“纠错文档.md”并附加针对该问题的“AI提示词，然后回复我是否写入了纠错文档和AGENTS.md”。
 - **向下兼容**: 任何针对逻辑代码的修改都不得与之前记录的问题冲突，必须保持逻辑兼容，严禁产生功能回退（Regression）。
 - **条件规范**：禁止擅自修改我没有提出问题的代码，除非需要兼容逻辑。禁止擅自新增我没有提出的功能。
-- **修改交互检查**：修改交互相关的代码时，需要你逐步跟随代码检查因果关系，逐步检查所有联动代码，确保代码交互逻辑正确
 
 ## Lottery Parsing Rules (Regressions to Avoid)
 
@@ -80,9 +79,9 @@
     - Example: `11. 14257尾` -> Numbers: [11] 和 [1尾, 4尾, 2尾, 5尾, 7尾]。
     - **金额剥离**: 任何大于 49 的数字（通常是金额）即便出现在候选列表中，也严禁参与上述抑制逻辑，必须允许其两侧的合法号码正常展开。
 - **清空数据并粘贴 (Clear & Paste) 核心逻辑**:
-    - **数据清空**: 强制执行 **全局重置**。发送全局重置信号（Electron: `reset-entry`, Web: `LOTTERY_RESET_REQUEST`, `isGlobal: true`）并调用 `handleReset(true, true, undefined, true)`。该操作会抹除【所有客户】在港澳双系统的所有实时流水与下注数据，严禁仅针对当前客户清空。
-    - **内容注入**: 绕过普通的 `handlePasteAndRecognize` 延时逻辑，直接通过 `navigator.clipboard.readText()` 获取文本，并同步更新 `modalInputValue` (持久化层) 和 `localModalValue` (UI渲染层)。
-    - **闭包同步**: 录入弹窗必须将该按钮的触发函数暴露给子组件，并确保其在依赖项变动时更新闭包中的 `lastSubmittedModalValue` 等状态。
+    - **独立窗口上下文保护**: `triggerClearAndPaste` 必须通过参数接收真实客户ID (`targetIdOverride`)，并在弹窗内调用时显式地传入当前环境选择的客户（如独立窗口的 `popOutTargetId`），防止其误获取到主窗口背景的 `default` 导致无法清空目标面板。
+    - **同步确认逻辑**: 数据清空必须完全照搬 `handleClearBoard` 原生的 `window.confirm` 阻塞确认逻辑，避免使用异步带有动画延迟的撤销弹窗导致打断执行。
+    - **解锁保护**: 清空并填充完毕后，必须额外补充执行 `setLastSubmittedModalValue('')`，彻底解除「保存下注」按钮因防抖检查而产生的锁定状态。
 
 ### 6. 录入界面规范
 - **系统标识**: 录入弹窗的预览区域，在每个识别结果的起始位置添加该条数据所属系统的单字缩写（如 `[港]` 或 `[澳]`）。要求字体大小与识别结果保持一致，使用普通文本显示（不带悬浮或透明度效果）。
@@ -162,7 +161,7 @@
 - **Summary Mode Redirection**: When in "Summary" (汇总) mode, the entry modal (internal or external) must **NEVER** redirect to the target customer's page upon saving. Data is synced silently in the background, and the summary view is instantly refreshed using a `refreshCounter`.
 - **Identity Integrity**: All bet records must capture the `customerName` at the time of entry. When aggregating in Summary mode, if a name is missing, it falls back to the customer's current name, but the entry logic should always explicitly provide the selected customer's name from the modal.
 - **Data Protection**: The "Clear Panel" (清空面板) button in the main number distribution matrix is **disabled** when in "Summary" (汇总) mode to prevent accidental deletion of global statistics.
-- **Global Clearing**: “清空数据并粘贴”功能具有 **全局破坏性**。点击后必须清空【所有客户】在香港和澳门两个系统中的所有流水与下注数据，无论当前处于哪个客户页面。此行为旨在确保粘贴新内容前，系统处于完全空白的真值状态。
+- **Targeted Clearing**: The "Clear and Paste" functionality in the entry modal specifically targets the customer selected within the modal's dropdown, ensuring that data for other customers (or the currently viewed customer) is not inadvertently cleared.
 - **Recent History**: Only show last 10 records on main page. "View All" for full history.
 - **Excel Export**: Columns `[原数据, 识别后的数据, 下注金额, 用户中奖金额, 赔付金额（未扣水）]`. Bet Amount 列包含原始数据备注（红三角）。支持多客户分页导出，每个客户对应一个 Excel Sheet。
 

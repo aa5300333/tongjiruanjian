@@ -269,3 +269,21 @@ ipcMain.on('resize-main-window', (event, { width, height }) => {
     mainWindow.center();
   }
 });
+
+// Broadcast lottery reset signal to all windows
+ipcMain.on('reset-entry', (event, data) => {
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (win.id !== event.sender.id) {
+      win.webContents.send('reset-entry-trigger', data);
+    }
+  });
+});
+
+// Broadcast customer state sync signal to all windows
+ipcMain.on('sync-customer-state', (event, data) => {
+  BrowserWindow.getAllWindows().forEach(win => {
+    if (win.id !== event.sender.id) {
+      win.webContents.send('sync-customer-state', data);
+    }
+  });
+});
