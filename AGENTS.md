@@ -2,9 +2,12 @@
 
 ## General Principles (核心准则)
 - **回复语言**: 必须始终使用 **中文** 与用户交流。
-- **逻辑追溯**: 每次修改逻辑和（Parsing）相关的代码并解决问题后，必须将“问题现象”与“修复方案”记录到记忆库中（AGENTS.md 和 纠错文档.md），作为长期规则。其中识别（Parsing）相关的修改必须写入“纠错文档.md”并附加针对该问题的“AI提示词，然后回复我是否写入了纠错文档和AGENTS.md”。
+- **逻辑追溯**: 每次修改逻辑和（Parsing）相关的代码并解决问题后，必须将“问题现象”与“修复方案”记录到记忆库中（AGENTS.md 和 纠错文档.md），作为长期规则。其中识别（Parsing）相关的修改必须写入“纠错文档.md”并附加针对该问题的“AI提示词，然后回复我是否写入了纠错文档 and AGENTS.md”。
 - **向下兼容**: 任何针对逻辑代码的修改都不得与之前记录的问题冲突，必须保持逻辑兼容，严禁产生功能回退（Regression）。
-- **条件规范**：禁止擅自修改我没有提出问题的代码，除非需要兼容逻辑。禁止擅自新增我没有提出的功能。
+- **条件规范**：禁止擅自修改我没有提出问题的代码，除非需要兼容逻辑。禁止擅自新增我没有提出的功能。修改完成后需要回复我问题根源出在哪里，并且解决方案是什么。
+- **本地 OCR 识别引擎 (PaddleOCR-json)**:
+    - 针对离线纯本地环境中的下注截图高精确识别，系统推荐通过桌面端软件底层直接对接 PaddleOCR-json 执行轻量高效进程解析。
+    - 前端组件（EntryModal 与 Standalone 窗口）不再打包过于臃肿的本地 chi_sim 离线库或强制依赖云端 Gemini API，确保纯文本极速渲染与 100% 数据安全隔离。
 
 ## Lottery Parsing Rules (Regressions to Avoid)
 
@@ -71,7 +74,7 @@
 - **Dash Normalization (符号归一化)**: 所有的长横线、中横线、全角横线（如 `–` `—` `－`）必须在预处理阶段统一归一化为标准的半角横线 `-`，以确保 `expandHeadTail` 和 `parseInput` 能正确分割号码。
 - **Cross-Line Isolation (跨行隔离)**: 头尾指令展开（`expandHeadTail`）严禁跨行捕捉数字序列。正则匹配必须排除换行符，防止上一行的金额数值干扰当前行的格式判断。
 - **Zero Filtering (零值拦截)**: 只有 1-49 为合法球号。任何独立出现的数字 `0` 或补零生成的 `00` 均视为无效数据，必须根据上下文转化为尾数（如 `0尾`）或直接过滤，严禁在流水和矩阵中显示 `00`。
-- **Keyword Normalization (关键词归一化)**: “一字”、“字”、“个字”、“一粒”等赋值语义词汇在解析前必须统一归一化为“各”，以确保所有金额提取逻辑和 UI 显示逻辑的一致性。
+- **Keyword Normalization (关键词归一化)**: “一字”、“字”、“个字”、“一粒”、“名”等赋值语义词汇在解析前必须统一归一化为“各”，以确保所有金额提取逻辑和 UI 显示逻辑的一致性。
 - **尾数识别抑制 (Tail Inhibition Refined)**: 只有当“尾/头”紧跟的数字为**多位数**（>=10 且 <=49）且处于使用点/冒号/逗号分隔的列表中时，才执行抑制（视为普通号码）。对于**单位数**（0-9）或**超范围数字**（>49），即便处于列表中，只要其紧贴“尾/头”字样，仍优先识别为尾数并进行展开。
     - **单双位区分**: 在非紧贴模式（带空格）下，`01` 等补零数字始终视为独立球号，不执行展开；只有真正的单位数（如 `1`）或超范围数字（如 `234`）才在特定条件下展开。
     - Example: `10.20.8尾` -> Numbers: [10, 20, 08, 18, 28, 38, 48]。
@@ -79,9 +82,10 @@
     - Example: `11. 14257尾` -> Numbers: [11] 和 [1尾, 4尾, 2尾, 5尾, 7尾]。
     - **金额剥离**: 任何大于 49 的数字（通常是金额）即便出现在候选列表中，也严禁参与上述抑制逻辑，必须允许其两侧的合法号码正常展开。
 - **清空数据并粘贴 (Clear & Paste) 核心逻辑**:
-    - **独立窗口上下文保护**: `triggerClearAndPaste` 必须通过参数接收真实客户ID (`targetIdOverride`)，并在弹窗内调用时显式地传入当前环境选择的客户（如独立窗口的 `popOutTargetId`），防止其误获取到主窗口背景的 `default` 导致无法清空目标面板。
-    - **同步确认逻辑**: 数据清空必须完全照搬 `handleClearBoard` 原生的 `window.confirm` 阻塞确认逻辑，避免使用异步带有动画延迟的撤销弹窗导致打断执行。
+    - **独立窗口上下文保护**: `triggerClearAndPaste` 必须通过参数接收真实客户ID (`targetIdOverride`)，并在弹窗内调用时显式地传入当前环境选择的客户（如独立窗口的 `popOutTargetId`），防止其误获取到主窗口背景 of `default` 导致无法清空目标面板。
+    - **同步确认逻辑**: 数据清空必须完全遵循原生 `window.confirm` 阻塞确认逻辑，避免使用异步带有动画延迟 of 撤销弹窗导致打断执行。
     - **解锁保护**: 清空并填充完毕后，必须额外补充执行 `setLastSubmittedModalValue('')`，彻底解除「保存下注」按钮因防抖检查而产生的锁定状态。
+    - **长效物理聚焦保障 (100% 绝不丢焦)**: 绝对禁止在“清空数据”或“录入赋空值”等操作过程中通过改变 `textareaKey` 销毁重建输入框 DOM 节点。清空或短文本填充时只改变 state 的 `value` 受控流动。同时必须搭配“分级多频节拍物理聚焦体系”（连续在“立即、50ms、150ms、300ms、500ms”等多频节拍重试聚焦并强制重置 selectionRange），以对抗 confirm 窗口和 clipboard 操作关闭后的系统滞后，保障在 Electron 打包部署及任何高负荷环境下 100% 绝不失焦且输入框始终能直接被选中编辑。
 
 ### 6. 录入界面规范
 - **系统标识**: 录入弹窗的预览区域，在每个识别结果的起始位置添加该条数据所属系统的单字缩写（如 `[港]` 或 `[澳]`）。要求字体大小与识别结果保持一致，使用普通文本显示（不带悬浮或透明度效果）。
@@ -113,9 +117,25 @@
     - 预览保护: 在 `cleanDisplayRaw` 中处理 `complexRegex` 时，必须使用 `RegExp.exec` 循环来获取准确的 `match.index`，禁止在带有捕获组的 `replace` 回调中直接使用第二个参数作为 offset。
 
 ### 9. 关键词归一化 (Keyword Normalization)
-- **语义归整**: “一个号”、“各号”、“个号”、“个”、“一字”、“字”、“个字”、“一粒”等赋值语义词汇在解析前必须统一归一化为“各”，以确保所有金额提取逻辑和 UI 显示逻辑的一致性。
+- **语义归整**: “一个号”、“各号”、“个号”、“个”、“一字”、“字”、“个字”、“一粒”、“名”等赋值语义词汇在解析前必须统一归一化为“各”，以确保所有金额提取逻辑和 UI 显示逻辑的一致性。
+- **单位算符及冗余清理 (Quantifiers & Operator Cleanup)**: 对 “各一个”、“一个”、“每个”，必须作为一个整体在 `TYPO_MAP` 中被一并归一化为 “各”。为了防止类似 `"各15一个"` 生成双重算符 `"各15各"` 并在其后无数字时被后方字符吸收为假锚点（从而断开或丢落后面的大长链），系统会在金额数字后进行冗余尾缀清理（`/(各|字|包|名)\s*(\d+|\d+\.\d+)\s*(各|字|名|个|一个|个字|各一个)(?!\s*\d)/gi`），优雅消除这些假算符干扰，让后方非算符数据得以 100% 连贯解析。
+- **错别字扩展**: 针对生肖及常见字输入偏差，将 “𤠣” 正确映射为 “猴”。
+- **终极业务纠错字典与清洗 (TRADING_DICTIONARY & finalCleanText)**:
+    - **逻辑**: 对本地 OCR 出来的拼音形似字（吗、件、午、奥、虹波等）及手写连笔标点进行清洗转换。一律通过 `replace(/[a-zA-Z]/g, '')` 物理抹去无语义英文，并利用 `replace(/[\.\,，、\-:_：]/g, '.')` 将各种非数字非汉字符号统一格式化为分隔点号 `.`，多重连续点合并归一。
+    - **执行时刻**: 
+        1. 在主进程 OCR 服务回传、剪贴板全自动监视同步（Electron与非Electron聚焦读取）、大面积清空并粘贴（triggerClearAndPaste）、手动点击粘贴并识别（handlePasteAndRecognize）四大外部导入数据写入输入框 `modalInputValue` / `localModalValue` 的那一瞬间，全量在最前端前置执行一次 `finalCleanText`，实现错字与标点的翻译净化，达成 100% 完美的所见即所得与零手打误判。
+        2. 另外在解析的核心预处理阶段 `correctTypos` 里直接融入 `TRADING_DICTIONARY` 生肖与玩法字典，保证无论是手打、剪贴板自动化感知还是 OCR，其下注解析在整个生命周期均不可多错一字。
 - **平摊逻辑 (Split Amount)**: 新增强金额分隔符“包”（与“各”同级别）。其作用为将提取到的金额平摊至该片段内的所有号码/目标。
     - Example: “龙包100” -> 龙包含4个号码，每个号码下注金额 = 100 / 4 = 25。
+    - **各包分拆规则**: 当 “包” 结合 “各” 共同出现时（如 “狗猴各包100元”），各目标（“狗”、“猴”）必须视为独立执行“包”逻辑（即等同于“狗包100 猴包100”），两组目标分别单独用该组内的号码数量平摊金额，从而完全继承并拆解为多个独立下注项目。
+    - **向下取整指示器 & 矩阵整数录入**: 针对使用 “包” 平摊金额的下注动作（如 “鼠包10”，4个号码各2.5元），在即时输入预览与落库合计后强制追加渲染首尾 `'（向下取整）'` 标记。数据录入号码矩阵及 `handleUndo` 撤回时，各单子球号的使用 `Math.floor(it.amount)` 直接向下取整入账（即矩阵中该项目球号最终为整 2 元下注）。
+    - **中金计算向下取整**: 无论是记录列表、后台对账还是 Excel 导出，如果该流水 `isSplitAmount` 为真（平摊玩法），其对应中金列应该先乘中奖个数再 **向下取整 Math.floor(hits * amount)**，杜绝误差。**特别注意**：在大盘/汇总模式下加载客户流动记录并运用算式系数（`coefficient`）进行缩放放大的映射过程中，针对平摊玩法的单项金额转换必须保持原始浮点数比例（即乘以系数后不执行 `Math.round` 强制截断，只有普通投注项目才在转换时进行 `Math.round`），以确保这些像 2.5元、3.75元 这样的精确浮点数不被提前四舍五入。这保证了 downstream 处的 `Math.floor(hits * item.amount)` 在大盘汇总视图下也能高度精确地向下取整为 2（或系数放大下的对应整值），确保与子账户实际落在分布矩阵中的取整数值保持对账时妥帖咬合。
+
+### 10. 撤销/下注生命周期中的还原保障 (移除负数解析)
+- **非负数金额硬约束**: 引擎不识别、不支持类似 `-1000`、`减1000`、`负1000` 等负数/扣减形式的金额输入（完全过滤负号和减、负字眼），所有通过解析入账的全新流水均为正数数值。
+- **精确浮点存储与对称撤销 (Symmetric Floating-Point Add/Sub for Split Amounts)**: 在入账和撤销 (handleUndo) 修改 `financeBetData` 时，使用 `Math.round((val) * 100) / 100` 保留两位小数存储浮点金额（如“蛇包10”各号码录入 2.5 元），禁止直接在计算阶段通过 `Math.round` 取整。这确保了在删除/撤销流水时，扣减完全对齐，避免发生四舍五入残余值（如残留 1 元）无法归零的问题。
+- **取消物理硬截断**: 在下注入账保存（`save`）与撤销还原（`handleUndo`）等任何操作修改资产矩阵 `financeBetData` 时，系统底层和撤销函数彻底废弃针对金额的 `Math.max(0, ...)` 强制截断置零逻辑。即使由于操作时序偏差出现临时极端的负值，也在底层完整保留。此对称性设计彻底保证了其在增加和回扣的生命周期中能按精确代数 1:1 无损还原，防止流水的增减过程发生累加值多进或少扣的 Regression 缺陷。
+- **矩阵边界自适应展示**: 号码分布矩阵支持完整实值呈现（金额只要 `!== 0` 均展示，包括小于 0 时的代数残留值），并且若矩阵中产生负数值，UI 字体强制高亮标记为红色（`text-red-500`）并带有柔和浅红色底色与边框（`bg-red-50/70 border-red-200`），从而以直观且规范的形式呈报、通知财务账目偏差。在前端渲染号码球的下注金额时，统一使用 `amount.toFixed(0)` 进行对账所需的零数取整显示。
 
 ## Database & Customer Management (客户与数据库管理)
 - **本地化存储**: 使用 `localStorage` 存储客户数据和下注状态。
@@ -124,7 +144,7 @@
     - 切换客户时会自动从 `localStorage` 获取该客户对应的状态并覆盖当前 UI。
     - **算式系数同步**: 系数存储键 (coefficient_) 强制设为全局共享（不带系统前缀），确保港澳系统间数值实时一致。
     - 任何操作（下注、清空、吃码、修改系数）都会实时同步到本地存储中的对应客户 Key。
-    - **数据持久化安全**: 在执行“清空面板”等破坏性操作后，系统必须**立即同步执行** `localStorage.setItem` 物理写入，严禁仅依赖带有延迟的 `useEffect` 自动保存。同时，清空当前客户的面板时，必须**同时清空该客户在“香港”和“澳门”两个系统中的所有数据**，以防止因页面切换或重载时出现数据回退。
+    - **数据持久化安全**: 在执行“清空面板”等破坏性操作后，系统必须**立即同步执行** `localStorage.setItem` 物理写入，严禁仅依赖带有延迟的 useEffect 自动保存。同时，清空当前客户的面板时，必须同时清空该客户在“香港”和“澳门”两个系统中的所有数据，以防止因页面切换或重载时出现数据回退。此外，清空单客户数据时（操作 customer_state_ 系列键），**绝对禁止**擦写或影响不带客户前缀的大盘公共级顶级键（如 `MO_financeBetData` 等），以保证本操作只作用于当前局部客户，100% 毫无死角地隔离对其他客户和大盘汇总累计值的误伤。
     - **跨窗口同步**: 监听 `storage` 事件，确保“录入助手”或多开窗口能实时同步最新的客户列表、下注数据及**算式系数**。
     - **一键清零**: 侧边栏提供“软件数据清零”功能。执行时会抹除所有业务数据（流水、账目、吃码记录），但**强制保留**两个系统（HK/MO）的客户库（local_customers）以及系统配置（赔率、反水、权重、算式系数等），随后刷新页面恢复初始业务状态。
 
@@ -159,8 +179,8 @@
 - **Sidebar Toggle**: The sidebar toggle button is embedded within the "Number Distribution Matrix" block, using the `Menu` icon (`lucide-react`).
 - **Entry Modal Selection**: The customer dropdown in the entry modal (both internal and standalone) excludes the "Summary" (汇总) option. It automatically syncs with the currently selected customer page. If on the Summary page, it defaults to the **last recorded customer** (stored in `last_recorded_customer_id`), or the first real customer if no record exists. This ensures the selection persists even after closing and reopening the modal.
 - **Summary Mode Redirection**: When in "Summary" (汇总) mode, the entry modal (internal or external) must **NEVER** redirect to the target customer's page upon saving. Data is synced silently in the background, and the summary view is instantly refreshed using a `refreshCounter`.
-- **Identity Integrity**: All bet records must capture the `customerName` at the time of entry. When aggregating in Summary mode, if a name is missing, it falls back to the customer's current name, but the entry logic should always explicitly provide the selected customer's name from the modal.
 - **Data Protection**: The "Clear Panel" (清空面板) button in the main number distribution matrix is **disabled** when in "Summary" (汇总) mode to prevent accidental deletion of global statistics.
+- **Identity Integrity**: All bet records must capture the `customerName` at the time of entry. When aggregating in Summary mode, if a name is missing, it falls back to the customer's current name, but the entry logic should always explicitly provide the selected customer's name from the modal.
 - **Targeted Clearing**: The "Clear and Paste" functionality in the entry modal specifically targets the customer selected within the modal's dropdown, ensuring that data for other customers (or the currently viewed customer) is not inadvertently cleared.
 - **Recent History**: Only show last 10 records on main page. "View All" for full history.
 - **Excel Export**: Columns `[原数据, 识别后的数据, 下注金额, 用户中奖金额, 赔付金额（未扣水）]`. Bet Amount 列包含原始数据备注（红三角）。支持多客户分页导出，每个客户对应一个 Excel Sheet。
@@ -179,6 +199,7 @@
 - **汇总数 (左框)**: 显示当前实地剩余金额 (`总额 - 已上报额`)。
 - **余下上报 (右框)**: 显示本次计算出的新上报建议差额 (`建议总上报 - 已上报额`)。
 - **执行联动**: 点击“执行吃码上报”时，右框金额将并入已上报库，导致左框（汇总数）相应减少，右框清空，符合“汇总减上报”的业务视觉感。
+- **联动受限原则 (只限风险区块)**: 吃码上报后的已上报金额和吃码计算的结果**纯粹作用于风险和吃码上报解算系统**。主界面的“号码分布矩阵”及“统计图表总成交额”在吃码上报后**绝不扣减**数据，继续呈现完整的投注账目，达到“吃码反馈只入风险，号码矩阵维持现状”的控制隔离。
 
 ### 1. 核心变量
 - **实际总额 (Gross Amount)**: `financeBetData[i]`，号码 `i` 的原始总下注额。
@@ -233,3 +254,23 @@
     - 引入 `physical change detection`（物理内容变化才填充）。
     - 保护规则：仅在输入框为空或内容为“上一次已提交内容”时覆盖，防止篡改用户正在输入的内容。
 - **Calculations**: Winning Amount 必须与 UI 显示的单注中奖计算逻辑一致。
+
+## 11. 智能图片识别大模型 OCR 设置 (Gemini API OCR Support)
+- **多引擎支持**: 系统设置和独立录入窗口中，用户可在“本地 OCR (Paddle)”与“Gemini 大模型”之间切换。
+- **本地安全原则**: 用户的 Gemini API Key 仅存储于本地 `localStorage` (`gemini_api_key`)，不做任何远端同步或向非 Google 的任何第三方汇报，确保数据独立安全。
+- **版本化模型自适应**: 支持自选 `gemini-2.5-flash` (高性价比首选) 与 `gemini-2.5-pro` (对复杂倾斜及极乱手写体有极强的鲁棒性)。默认模型设定在全系统统一为 `gemini-2.5-flash`。
+- **载荷规范**: 使用 `@google/genai` TypeScript SDK 的 `ai.models.generateContent` 时，多模态参数 `contents` 必须严格通过单一 Content 对象封装 `{ parts: [ { inlineData: ... }, { text: ... } ] }` 以满足 SDK 的强校验规则，切忌以 Parts 数组直接作为 `contents` 的值以防报错。
+- **指令完美自愈**: 图片通过大模型识别完成后，识别到的文本流立即在最前置经过 `finalCleanText` 和 `correctTypos` 的清洗翻译纠偏，直接输出极润语法的高亮彩票指令。
+
+## 12. 开启大盘/汇总页面清空面板 (Enabling clear board on summary views)
+- **无损干净清零规则**: 在 `'default'` (大盘汇总全部客户) 状态下放开并启用“清空面板”功能。在此阶段，系统将执行全客户及大盘的双重重置，确保：
+  1. 内存中各大盘的 `financeBetData` 状态机与流水等数据强制置空极其干净。
+  2. 物理清除 localStorage 中不带前缀的所有公共/大盘顶级数据（如 `MO_financeBetData` 等值）。
+  3. 遍历并一并物理清扫在 `localStorage` 中所有真实客户账户（除了 `default` 外）在“香港”和“澳门”两个系统中的 `customer_state_` 关键项。
+  4. 随后触发页面无损计数累加强力重置，保持客户列表名单以及赔率/反水/权重系数等公共软配置完整保留，绝不发生回退或丢失基础系统配置的前提下一键对齐。
+
+## 13. 特定客户与大盘汇总两级跨系统合计与总和对账机制
+- **客户视角完美契合**: 在具体客户详情页（`selectedCustomerId !== 'default'`）时，“澳-当前客户合计”与“港-当前客户合计”应直接累加 1~49 里面未有折算系数的原始面额（即不折算），使得底部合计与此时屏幕上方该客户的**原始不折算号码分布矩阵**完美一致。
+- **大盘汇总完美对齐**: 在全部客户汇总模式下（`selectedCustomerId === 'default'`），“澳-当前客户合计”与“港-当前客户合计”则必须使用 **“球级系数分别折算取整再累加”** 的算法（即每个号码分别乘算系数后四舍五入 `Math.round(val * coeff)`，再进行 49 个号码的总加和）。这能确保汇总统计在各种浮点折扣运作下，与汇总界面折算过的矩阵大图显示百分百严正契合（比如 “5元 * 0.70 = 4元，10个号码四舍五入后在矩阵显示4元，汇总底部合计应该计算为 40元而非 35元”），实现真正的两级零偏差财务对账。
+
+

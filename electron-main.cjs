@@ -1,11 +1,76 @@
 const { app, BrowserWindow, ipcMain, Menu, clipboard } = require('electron');
 const path = require('path');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 
 let mainWindow;
 let entryWindow;
 let settingsWindow;
 let clipboardTimer = null;
 let lastClipboardText = '';
+
+// PaddleOCR-json 进程管理与支持
+let ocrProcess = null;
+
+function initPaddleOCR() {
+  console.log('正在检测并运行 PaddleOCR-json 离线引擎...');
+  
+  // 1. 获取软件实际运行所在的物理目录（双击的 exe 同级目录）
+  // process.execPath 指向当前运行的 exe (在便携版中，指向临时目录的 exe 或真实的外部 exe)
+  // 我们穿透找它的物理同级目录
+  const currentExeDir = path.dirname(process.execPath);
+  // app.getAppPath() 指向当前程序的应用目录
+  const appPath = app.getAppPath();
+  const projectRootDir = path.join(appPath, '..', '..'); // 穿透 app.asar 的外部物理根目录
+
+  const possiblePaths = [
+    // 优先：双击运行的 .exe 同级目录下的 big/ 或 bin/ 目录 (最适合便携版，用户把 big 文件夹放在软件外面同级)
+    path.join(currentExeDir, 'big', 'PaddleOCR-json.exe'),
+    path.join(currentExeDir, 'bin', 'PaddleOCR-json.exe'),
+    path.join(currentExeDir, 'PaddleOCR-json.exe'),
+
+    // 其次：开发环境或传统 unpacked 打包时，项目根目录或 resources 下的目录
+    path.join(__dirname, 'big', 'PaddleOCR-json.exe'),
+    path.join(__dirname, 'bin', 'PaddleOCR-json.exe'),
+    path.join(process.resourcesPath, 'big', 'PaddleOCR-json.exe'),
+    path.join(process.resourcesPath, 'bin', 'PaddleOCR-json.exe'),
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'big', 'PaddleOCR-json.exe'),
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'bin', 'PaddleOCR-json.exe'),
+    path.join(projectRootDir, 'big', 'PaddleOCR-json.exe'),
+    path.join(projectRootDir, 'bin', 'PaddleOCR-json.exe'),
+  ];
+
+  let exePath = '';
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      exePath = p;
+      break;
+    }
+  }
+
+  if (!exePath) {
+    console.warn('⚠️ 未在任何可能路径下找到 PaddleOCR-json.exe，离线图片识别功能将不可用。');
+    return;
+  }
+
+  try {
+    // 开启后台 PaddleOCR 进程 (以管道 JSON 交互模式运行，不打开外部 CMD)
+    ocrProcess = spawn(exePath, [], {
+      cwd: path.dirname(exePath),
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true
+    });
+
+    ocrProcess.stdout.on('data', (data) => {
+      console.log('PaddleOCR-json 响应数据:', data.toString('utf8'));
+    });
+
+    console.log('✅ PaddleOCR-json 后端进程挂载完成：', exePath);
+  } catch (err) {
+    console.error('❌ 拉起 PaddleOCR-json 进程失败:', err);
+  }
+}
 
 function startClipboardMonitor() {
   if (clipboardTimer) return;
@@ -156,6 +221,7 @@ function createSettingsWindow() {
 app.whenReady().then(() => {
   // 全局停用菜单，这是最彻底的方法
   Menu.setApplicationMenu(null);
+  initPaddleOCR();
   createMainWindow();
   createEntryWindow();
 });
@@ -167,6 +233,10 @@ app.on('browser-window-created', (e, window) => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  if (ocrProcess) {
+    ocrProcess.kill();
+    ocrProcess = null;
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -284,6 +354,65 @@ ipcMain.on('sync-customer-state', (event, data) => {
   BrowserWindow.getAllWindows().forEach(win => {
     if (win.id !== event.sender.id) {
       win.webContents.send('sync-customer-state', data);
+    }
+  });
+});
+
+// 新增：高精准度离线 PaddleOCR-json 进程调用逻辑
+ipcMain.handle('perform-offline-ocr', async (event, base64Data) => {
+  return new Promise((resolve) => {
+    if (!ocrProcess) {
+      resolve({ success: false, error: '后台 PaddleOCR 离线引擎尚未初始化，请确保已将压缩包文件正确解压至项目的 bin/ 文件夹下。' });
+      return;
+    }
+
+    try {
+      // 1. 将 Base64 格式的图片数据快速写出为本地系统的临时图片文件
+      const tempImgPath = path.join(os.tmpdir(), `ocr_temp_${Date.now()}.png`);
+      const buffer = Buffer.from(base64Data, 'base64');
+      fs.writeFileSync(tempImgPath, buffer);
+
+      // 2. 拼接成 PaddleOCR-json 可识别的单行格式命令，注入到后台执行管道，要求获取纯文本
+      const command = JSON.stringify({ image_path: tempImgPath }) + '\n';
+      
+      // 创建一次性监听，接收本次对应的识别流响应
+      const onData = (data) => {
+        try {
+          const resStr = data.toString('utf8');
+          // PaddleOCR-json 解析成功，返回的 JSON 通常带有 code: 100 和 data
+          const parsed = JSON.parse(resStr);
+          
+          // 安全清除临时图片文件
+          try { fs.unlinkSync(tempImgPath); } catch {}
+          ocrProcess.stdout.removeListener('data', onData);
+
+          if (parsed && parsed.code === 100 && Array.isArray(parsed.data)) {
+            // 将每一行解析出的汉字和号码结合换行拼装
+            const resultLines = parsed.data.map(item => item.text);
+            resolve({ success: true, text: resultLines.join('\n') });
+          } else if (parsed && parsed.code === 101) {
+            resolve({ success: true, text: '' }); // 空白图片或无字
+          } else {
+            resolve({ success: false, error: parsed.data || '引擎返回异常状态' });
+          }
+        } catch (e) {
+          // JSON 截断或未拼接完整，继续等待，直到解析出完整数据
+        }
+      };
+
+      ocrProcess.stdout.on('data', onData);
+      ocrProcess.stdin.write(command);
+
+      // 设置安全超时断开机制：防止空转，3秒无阻断防护
+      setTimeout(() => {
+        ocrProcess.stdout.removeListener('data', onData);
+        try { fs.unlinkSync(tempImgPath); } catch {}
+        resolve({ success: false, error: 'OCR 识别服务超时，请确认图片大小或重试。' });
+      }, 3500);
+
+    } catch (err) {
+      console.error(err);
+      resolve({ success: false, error: err.message });
     }
   });
 });

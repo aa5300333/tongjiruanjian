@@ -35,7 +35,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence, useDragControls } from 'motion/react';
 import XLSX from 'xlsx-js-style';
-import { parseInput, ZODIAC_LIST, getNumbersByZodiac } from './utils/lotteryParser';
+import { parseInput, ZODIAC_LIST, getNumbersByZodiac, finalCleanText } from './utils/lotteryParser';
+import { performGeminiOcr } from './utils/geminiOcr';
 import defaultConfig from '../public/配置文件.json';
 
 interface BetItem {
@@ -43,6 +44,7 @@ interface BetItem {
   amount: number;
   raw: string;
   system?: 'HK' | 'MO';
+  isSplitAmount?: boolean;
 }
 
 interface BetRecord {
@@ -89,7 +91,7 @@ export default function App() {
     // Customers, coefficients and global settings are shared between systems
     const sharedKeys = [
       'local_customers', 'enableSearchUndo', 'requireUndoConfirm', 
-      'requireUndoPasteConfirm', 'autoPasteEnabled', 'followCustomerRisk',
+      'autoPasteEnabled', 'followCustomerRisk',
       'enableCustomerEatingReport', 'smartSystemRecognition',
       'auxSpecialNumber', 'specialNumber', 'auxSpecialNumberInput', 'specialNumberInput',
       'riskNumbers', 'LOTTERY_EXTERNAL_SUBMIT', 'LOTTERY_UNDO_REQUEST', 'LOTTERY_RESET_REQUEST'
@@ -97,10 +99,11 @@ export default function App() {
     if (sharedKeys.some(sk => key.includes(sk)) || key.startsWith('coefficient_')) {
       return key; 
     }
-    // MO has prefix, HK is default (legacy compatibility)
-    return systemType === 'MO' ? `MO_${key}` : key;
+    // Force explicit prefix for both systems
+    return systemType === 'MO' ? `MO_${key}` : `HK_${key}`;
   }, [systemType]);
 
+  const [standaloneIsDragging, setStandaloneIsDragging] = useState(false);
   const [activeView, setActiveView] = useState<'stats' | 'compound' | 'eating'>(() => {
     if (typeof window !== 'undefined') {
        return (localStorage.getItem('last_active_view') as any) || 'stats';
@@ -193,6 +196,24 @@ export default function App() {
     }
     return '';
   });
+  const [textareaKey, setTextareaKey] = useState(0);
+  const [clearConfirmActive, setClearConfirmActive] = useState(false);
+  const confirmTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 独立模式下的聚焦保障：在挂载或 Key 发生变化时强制请求焦点
+  useEffect(() => {
+    if (standaloneMode) {
+      const timer = setTimeout(() => {
+        if (standaloneInputRef.current) {
+          window.focus();
+          standaloneInputRef.current.focus();
+          const len = standaloneInputRef.current.value.length;
+          standaloneInputRef.current.setSelectionRange(len, len);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [standaloneMode, textareaKey]);
 
   const [isModalOpen, setIsModalOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -221,7 +242,76 @@ export default function App() {
   const [lastSubmittedModalValue, setLastSubmittedModalValue] = useState('');
   const lastClipboardContent = useRef<string>('');
 
-  
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState('');
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const processImageFile = async (file: File) => {
+    if (ocrEngine === 'gemini') {
+      try {
+        setOcrLoading(true);
+        setOcrProgress('正在通过 Google Gemini 智慧大模型极速处理图片中...');
+        const detectedText = await performGeminiOcr(file, geminiApiKey, geminiModel || 'gemini-2.5-flash');
+        if (detectedText) {
+          const cleanedText = finalCleanText(detectedText);
+          const newVal = modalInputValue ? modalInputValue + '\n' + cleanedText : cleanedText;
+          setModalInputValue(newVal);
+          setLocalModalValue(newVal);
+        } else {
+          alert('未能从图片中解析出任何满足规则的文本，请确认图片清晰。');
+        }
+      } catch (err: any) {
+        console.error(err);
+        alert('大模型 OCR 识别错误: ' + err.message);
+      } finally {
+        setOcrLoading(false);
+        setOcrProgress('');
+      }
+      return;
+    }
+
+    const electron = window.electron as any;
+    if (!electron || !electron.performOfflineOcr) {
+      alert('检测到您在非客户端（浏览器）环境运行，并且未开启 Gemini 智能大模型识别，无法拉起本地 PaddleOCR-json.exe 后端服务！');
+      return;
+    }
+    try {
+      setOcrLoading(true);
+      setOcrProgress('正在通过本地 PaddleOCR-json 后台进程极速识别中...');
+      const base64 = await fileToBase64(file);
+      const res = await electron.performOfflineOcr(base64);
+      if (res && res.success) {
+        if (res.text) {
+          const cleanedText = finalCleanText(res.text);
+          const newVal = modalInputValue ? modalInputValue + '\n' + cleanedText : cleanedText;
+          setModalInputValue(newVal);
+          setLocalModalValue(newVal);
+        } else {
+          alert('未能从图片中解析出任何满足规则的文本，请确认图片清晰。');
+        }
+      } else {
+        alert('离线 OCR 识别错误: ' + (res?.error || '请确认 bin/ 货 big/ 下存在 PaddleOCR-json.exe 且已正常加载。'));
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('图片处理失败: ' + err.message);
+    } finally {
+      setOcrLoading(false);
+      setOcrProgress('');
+    }
+  };
+
   const [autoPasteEnabled, setAutoPasteEnabled] = useState<boolean>(() => {
     const key = getSysKey('autoPasteEnabled');
     const saved = localStorage.getItem(key);
@@ -239,8 +329,9 @@ export default function App() {
         // 仅在物理内容更新时触发同步
         if (text === lastClipboardContent.current) return;
         lastClipboardContent.current = text;
-        setModalInputValue(text);
-        setLocalModalValue(text);
+        const cleanedText = finalCleanText(text);
+        setModalInputValue(cleanedText);
+        setLocalModalValue(cleanedText);
       });
       return () => {
         if (removeListener) removeListener();
@@ -259,8 +350,9 @@ export default function App() {
             // 只有当剪贴板内容与上一次成功同步的内容不同时，才触发更新
             if (text && text.trim() && text !== lastClipboardContent.current) {
               lastClipboardContent.current = text;
-              setModalInputValue(text);
-              setLocalModalValue(text);
+              const cleanedText = finalCleanText(text);
+              setModalInputValue(cleanedText);
+              setLocalModalValue(cleanedText);
               console.log('App: 检测到剪贴板物理更新，自动同步成功');
             }
           }
@@ -313,14 +405,13 @@ export default function App() {
         if (savedEatingReport) setEnableCustomerEatingReport(savedEatingReport === 'true');
         
         // 强制刷新其他非敏感设置
-        ['enableSearchUndo', 'smartSystemRecognition', 'requireUndoConfirm', 'requireUndoPasteConfirm', 'autoPasteEnabled', 'isCompactMode'].forEach(k => {
+        ['enableSearchUndo', 'smartSystemRecognition', 'requireUndoConfirm', 'autoPasteEnabled', 'isCompactMode'].forEach(k => {
           const v = localStorage.getItem(k);
           if (v !== null) {
             const bv = v === 'true';
             if (k === 'enableSearchUndo') setEnableSearchUndo(bv);
             if (k === 'smartSystemRecognition') setSmartSystemRecognition(bv);
             if (k === 'requireUndoConfirm') setRequireUndoConfirm(bv);
-            if (k === 'requireUndoPasteConfirm') setRequireUndoPasteConfirm(bv);
             if (k === 'autoPasteEnabled') setAutoPasteEnabled(bv);
             if (k === 'isCompactMode') setIsCompactMode(bv);
           }
@@ -339,7 +430,7 @@ export default function App() {
 
   const [customHeight, setCustomHeight] = useState(() => {
     const saved = localStorage.getItem('customHeight');
-    return saved ? parseInt(saved) : (isCompactMode ? 620 : 903);
+    return saved ? parseInt(saved) : (isCompactMode ? 658 : 903);
   });
 
   // Toggle compact mode
@@ -350,7 +441,7 @@ export default function App() {
     
     // Auto adjust resolution when toggling preset modes
     const newW = newValue ? 730 : 1420;
-    const newH = newValue ? 620 : 903;
+    const newH = newValue ? 658 : 903;
     setCustomWidth(newW);
     setCustomHeight(newH);
     localStorage.setItem('customWidth', newW.toString());
@@ -431,11 +522,6 @@ export default function App() {
   });
   const [requireUndoConfirm, setRequireUndoConfirm] = useState<boolean>(() => {
     const key = getSysKey('requireUndoConfirm');
-    const saved = localStorage.getItem(key);
-    return saved === null ? true : saved === 'true'; // Default ON
-  });
-  const [requireUndoPasteConfirm, setRequireUndoPasteConfirm] = useState<boolean>(() => {
-    const key = getSysKey('requireUndoPasteConfirm');
     const saved = localStorage.getItem(key);
     return saved === null ? true : saved === 'true'; // Default ON
   });
@@ -710,13 +796,26 @@ export default function App() {
     }
     return defaultConfig.default_rebate || 4;
   });
+  const [ocrEngine, setOcrEngine] = useState<'paddle' | 'gemini'>(() => {
+    return (localStorage.getItem('ocr_engine') as 'paddle' | 'gemini') || 'paddle';
+  });
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
+    return localStorage.getItem('gemini_api_key') || '';
+  });
+  const [geminiModel, setGeminiModel] = useState<string>(() => {
+    return localStorage.getItem('gemini_model') || 'gemini-2.5-flash';
+  });
+
+  const [tempOcrEngine, setTempOcrEngine] = useState<'paddle' | 'gemini'>(ocrEngine);
+  const [tempGeminiApiKey, setTempGeminiApiKey] = useState<string>(geminiApiKey);
+  const [tempGeminiModel, setTempGeminiModel] = useState<string>(geminiModel);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempOdds, setTempOdds] = useState(odds);
   const [tempRebate, setTempRebate] = useState(rebate);
   const [tempEnableSearchUndo, setTempEnableSearchUndo] = useState(enableSearchUndo);
   const [tempSmartSystemRecognition, setTempSmartSystemRecognition] = useState(smartSystemRecognition);
   const [tempRequireUndoConfirm, setTempRequireUndoConfirm] = useState(requireUndoConfirm);
-  const [tempRequireUndoPasteConfirm, setTempRequireUndoPasteConfirm] = useState(requireUndoPasteConfirm);
   const [tempAutoPasteEnabled, setTempAutoPasteEnabled] = useState(autoPasteEnabled);
   const [tempFollowCustomerRisk, setTempFollowCustomerRisk] = useState(followCustomerRisk);
   const [tempEnableCustomerEatingReport, setTempEnableCustomerEatingReport] = useState(enableCustomerEatingReport);
@@ -732,15 +831,17 @@ export default function App() {
       setTempEnableSearchUndo(enableSearchUndo);
       setTempSmartSystemRecognition(smartSystemRecognition);
       setTempRequireUndoConfirm(requireUndoConfirm);
-      setTempRequireUndoPasteConfirm(requireUndoPasteConfirm);
       setTempAutoPasteEnabled(autoPasteEnabled);
       setTempFollowCustomerRisk(followCustomerRisk);
       setTempEnableCustomerEatingReport(enableCustomerEatingReport);
       setTempCompactMode(isCompactMode);
       setTempWidth(customWidth);
       setTempHeight(customHeight);
+      setTempOcrEngine(ocrEngine);
+      setTempGeminiApiKey(geminiApiKey);
+      setTempGeminiModel(geminiModel);
     }
-  }, [isSettingsOpen, odds, rebate, enableSearchUndo, smartSystemRecognition, requireUndoConfirm, requireUndoPasteConfirm, autoPasteEnabled, followCustomerRisk, enableCustomerEatingReport, isCompactMode, customWidth, customHeight]);
+  }, [isSettingsOpen, odds, rebate, enableSearchUndo, smartSystemRecognition, requireUndoConfirm, autoPasteEnabled, followCustomerRisk, enableCustomerEatingReport, isCompactMode, customWidth, customHeight, ocrEngine, geminiApiKey, geminiModel]);
 
   // Reset modal focus when it opens
   useEffect(() => {
@@ -754,6 +855,7 @@ export default function App() {
     if (!showLastUndoConfirm) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      console.log('handleKeyDown triggered', e.key, showLastUndoConfirm);
       if (!showLastUndoConfirm) return;
 
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
@@ -776,8 +878,11 @@ export default function App() {
       }
     };
 
+    /*
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
+    */
+    return undefined;
   }, [showLastUndoConfirm, undoModalFocus, undoCallback]);
 
   const [eatenAmounts, setEatenAmounts] = useState<Record<number, number>>(() => {
@@ -795,15 +900,8 @@ export default function App() {
   const [eatingPercentage, setEatingPercentage] = useState<number>(70);
 
   const summaryMatrixData = useMemo(() => {
-    if (selectedCustomerId === 'default') {
-      const net: Record<number, number> = {};
-      for (let i = 1; i <= 49; i++) {
-        net[i] = Math.max(0, (displayBetData[i] || 0) - (eatenAmounts[i] || 0));
-      }
-      return net;
-    }
     return displayBetData;
-  }, [selectedCustomerId, displayBetData, eatenAmounts]);
+  }, [displayBetData]);
 
   useEffect(() => {
     localStorage.setItem(getSysKey('eatingThreshold'), eatingThreshold.toString());
@@ -971,46 +1069,52 @@ export default function App() {
     for (let i = 1; i <= 49; i++) emptyBet[i] = 0;
     
     if (isGlobal) {
-      // 1. 全局清理所有客户的状态 (港澳双系统)
-      customers.forEach(c => {
-        const emptyState = {
-          financeBetData: emptyBet,
-          eatenAmounts: {},
-          financeRecords: [],
-          compoundRecords: [],
-          eatingHistory: [],
-          totalTurnover: 0
-        };
-        // 彻底清空，不再对 'default' 进行特权保留，确保重置彻底
-        localStorage.setItem(`customer_state_${c.id}`, JSON.stringify(emptyState));
-        localStorage.setItem(`MO_customer_state_${c.id}`, JSON.stringify(emptyState));
-        localStorage.setItem(`HK_customer_state_${c.id}`, JSON.stringify(emptyState));
-      });
+      // 1. 【核武器级清理】不依赖客户列表，直接物理扫描整个浏览器存储
+      try {
+        const keys = Object.keys(localStorage);
+        const dataKeyKeywords = [
+          'customer_state_', 'customer_summary_state', 'financeBetData',
+          'financeRecords', 'compoundRecords', 'eatenAmounts', 'eatingHistory'
+        ];
+        
+        keys.forEach(key => {
+          // 只要键名包含数据关键字，直接抹除
+          if (dataKeyKeywords.some(keyword => key.includes(keyword))) {
+            if (key.includes('financeBetData')) {
+              localStorage.setItem(key, JSON.stringify(emptyBet));
+            } else if (key.includes('eatenAmounts')) {
+              localStorage.setItem(key, '{}');
+            } else if (key.includes('customer_')) {
+              localStorage.setItem(key, JSON.stringify({
+                financeBetData: emptyBet,
+                eatenAmounts: {},
+                financeRecords: [],
+                compoundRecords: [],
+                eatingHistory: [],
+                totalTurnover: 0
+              }));
+            } else {
+              localStorage.setItem(key, '[]');
+            }
+          }
+        });
+      } catch (e) {
+        console.error('Master wipe failed', e);
+      }
 
-      // 2. 清理全局层面的系统数据 (港澳双系统)
-      const prefixes = ['', 'MO_'];
-      prefixes.forEach(p => {
-        localStorage.setItem(`${p}financeBetData`, JSON.stringify(emptyBet));
-        localStorage.setItem(`${p}financeRecords`, JSON.stringify([]));
-        localStorage.setItem(`${p}compoundRecords`, JSON.stringify([]));
-        localStorage.setItem(`${p}eatingHistory`, JSON.stringify([]));
-        localStorage.setItem(`${p}eatenAmounts`, JSON.stringify({}));
-      });
-
-      // 3. 更新内存中的状态
+      // 2. 内存状态全量强制归零
       setFinanceBetData(emptyBet);
       setFinanceRecords([]);
       setCompoundRecords([]);
       setEatingHistory([]);
       setEatenAmounts({});
+      if (typeof setScaledBetData === 'function') setScaledBetData({});
       setDrawNumbers(Array(7).fill(null));
 
-      // 汇总模式下强制刷新
-      if (selectedCustomerId === 'default') {
-        setRefreshCounter(prev => prev + 1);
-      }
+      // 强制所有页面刷新
+      setRefreshCounter(prev => prev + 1);
     } else {
-      // 原有的单客户重置逻辑
+      // 原有的单客户重置逻辑...
       const tId = targetCustomerId || selectedCustomerId;
       const isCurrentActive = tId === selectedCustomerId;
 
@@ -1023,22 +1127,19 @@ export default function App() {
         setEatenAmounts({});
       }
 
-      if (isCurrentActive || tId === 'default') {
-        localStorage.setItem('financeBetData', JSON.stringify(emptyBet));
-        localStorage.setItem('financeRecords', JSON.stringify([]));
-        localStorage.setItem('compoundRecords', JSON.stringify([]));
-        localStorage.setItem('eatingHistory', JSON.stringify([]));
-        localStorage.setItem('eatenAmounts', JSON.stringify({}));
-        
-        localStorage.setItem('MO_financeBetData', JSON.stringify(emptyBet));
-        localStorage.setItem('MO_financeRecords', JSON.stringify([]));
-        localStorage.setItem('MO_compoundRecords', JSON.stringify([]));
-        localStorage.setItem('MO_eatingHistory', JSON.stringify([]));
-        localStorage.setItem('MO_eatenAmounts', JSON.stringify({}));
+      if (tId === 'default') {
+        const systems = ['', 'MO_', 'HK_'];
+        systems.forEach(p => {
+          localStorage.setItem(`${p}financeBetData`, JSON.stringify(emptyBet));
+          localStorage.setItem(`${p}financeRecords`, JSON.stringify([]));
+          localStorage.setItem(`${p}compoundRecords`, JSON.stringify([]));
+          localStorage.setItem(`${p}eatingHistory`, JSON.stringify([]));
+          localStorage.setItem(`${p}eatenAmounts`, JSON.stringify({}));
+        });
       }
 
       if (tId && tId !== 'default') {
-        const stateToSave = {
+        const emptyState = {
           financeBetData: emptyBet,
           eatenAmounts: {},
           financeRecords: [],
@@ -1046,16 +1147,15 @@ export default function App() {
           eatingHistory: [],
           totalTurnover: 0
         };
-        localStorage.setItem(`customer_state_${tId}`, JSON.stringify(stateToSave));
-        localStorage.setItem(`MO_customer_state_${tId}`, JSON.stringify(stateToSave));
+        localStorage.setItem(`customer_state_${tId}`, JSON.stringify(emptyState));
+        localStorage.setItem(`MO_customer_state_${tId}`, JSON.stringify(emptyState));
+        localStorage.setItem(`HK_customer_state_${tId}`, JSON.stringify(emptyState));
       }
       
-      if (selectedCustomerId === 'default') {
-        setRefreshCounter(prev => prev + 1);
-      }
+      setRefreshCounter(prev => prev + 1);
     }
 
-    // 处理特码和风险号码的清理 (逻辑保持一致：全局或单客户时共用此保持逻辑)
+    // 处理特码和风险号码的清理
     if (!keepSpecialNumbers) {
       if (isGlobal || targetCustomerId === selectedCustomerId) {
         setSpecialNumber(null);
@@ -1077,7 +1177,7 @@ export default function App() {
     // Re-enable auto-save after state settles
     setTimeout(() => {
       isSwitchingRef.current = false;
-    }, 500);
+    }, 2000);
 
     setError(null);
     setShowResetConfirm(false);
@@ -1092,6 +1192,7 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [error]);
+
 
   // Detect standalone mode AND sync data across windows
   // Update the handleParse ref whenever it changes
@@ -1223,9 +1324,9 @@ export default function App() {
         if (e.key === getSysKey('enableSearchUndo')) setEnableSearchUndo(e.newValue === 'true');
         if (e.key === getSysKey('smartSystemRecognition')) setSmartSystemRecognition(e.newValue === 'true');
         if (e.key === getSysKey('requireUndoConfirm')) setRequireUndoConfirm(e.newValue === 'true');
-        if (e.key === getSysKey('requireUndoPasteConfirm')) setRequireUndoPasteConfirm(e.newValue === 'true');
         if (e.key === getSysKey('autoPasteEnabled')) setAutoPasteEnabled(e.newValue !== 'false');
         if (e.key === getSysKey('riskNumbers')) setRiskNumbers(JSON.parse(e.newValue || '[]'));
+        if (e.key === getSysKey('modalInputValue') && e.newValue !== null) setModalInputValue(e.newValue);
         if (e.key === getSysKey('followCustomerRisk')) setFollowCustomerRisk(e.newValue === 'true');
         if (e.key === getSysKey('enableCustomerEatingReport')) setEnableCustomerEatingReport(e.newValue === 'true');
         if (e.key === 'isCompactMode') setIsCompactMode(e.newValue === 'true');
@@ -1369,10 +1470,6 @@ export default function App() {
   }, [requireUndoConfirm, getSysKey]);
 
   useEffect(() => {
-    localStorage.setItem(getSysKey('requireUndoPasteConfirm'), requireUndoPasteConfirm.toString());
-  }, [requireUndoPasteConfirm, getSysKey]);
-
-  useEffect(() => {
     localStorage.setItem(getSysKey('autoPasteEnabled'), autoPasteEnabled.toString());
   }, [autoPasteEnabled, getSysKey]);
 
@@ -1381,11 +1478,13 @@ export default function App() {
   }, [followCustomerRisk, getSysKey]);
 
   useEffect(() => {
+    // 允许同步输入框内容到本地存储，但不参与导致回退的逻辑
     localStorage.setItem(getSysKey('modalInputValue'), modalInputValue);
   }, [modalInputValue, getSysKey]);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modalInputRef = useRef<HTMLTextAreaElement>(null);
+  const standaloneInputRef = useRef<HTMLTextAreaElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
   const standalonePreviewScrollRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
@@ -1396,6 +1495,23 @@ export default function App() {
       previewScrollRef.current.scrollTop = previewScrollRef.current.scrollHeight;
     }
   }, [modalInputValue, isModalOpen]);
+
+  // FIX: 自动聚焦逻辑 - 只有在没有焦点时才尝试聚焦，且不要在输入内容变化时强行触发（除非是清空操作）
+  useEffect(() => {
+    if (standaloneMode && standaloneInputRef.current) {
+      // 初始聚焦
+      if (document.activeElement !== standaloneInputRef.current) {
+        standaloneInputRef.current.focus();
+      }
+    }
+  }, [standaloneMode]); // 仅在模式切换时触发，或显式调用聚焦
+
+  // 监听输入清空时重新聚焦
+  useEffect(() => {
+    if (standaloneMode && modalInputValue === '' && standaloneInputRef.current) {
+      standaloneInputRef.current.focus();
+    }
+  }, [modalInputValue, standaloneMode]);
 
   useEffect(() => {
     if (standalonePreviewScrollRef.current) {
@@ -1432,6 +1548,100 @@ export default function App() {
     }, 0);
   }, [financeBetData, compoundRecords, activeView, systemType]);
 
+  const macauTotal = useMemo(() => {
+    if (selectedCustomerId === 'default') {
+      let sum = 0;
+      customers.forEach(c => {
+        if (c.id === 'default') return;
+        const saved = localStorage.getItem(`MO_customer_state_${c.id}`) || localStorage.getItem(`customer_state_${c.id}`);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data.financeBetData) {
+            const coeffKey = `coefficient_${c.id}`;
+            const coeffSaved = localStorage.getItem(coeffKey);
+            const coeff = coeffSaved ? parseFloat(coeffSaved) : 1.0;
+            let customerSum = 0;
+            for (let i = 1; i <= 49; i++) {
+              const val = data.financeBetData[i] || 0;
+              customerSum += Math.round(val * coeff);
+            }
+            sum += customerSum;
+          }
+        }
+      });
+      return sum;
+    } else {
+      let targetBetData: Record<number, number> = {};
+      if (systemType === 'MO') {
+        targetBetData = financeBetData;
+      } else {
+        const saved = localStorage.getItem(`MO_customer_state_${selectedCustomerId}`);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data.financeBetData) {
+            targetBetData = data.financeBetData;
+          }
+        }
+      }
+      
+      let sum = 0;
+      for (let i = 1; i <= 49; i++) {
+        sum += (targetBetData[i] || 0);
+      }
+      return sum;
+    }
+  }, [systemType, selectedCustomerId, customers, refreshCounter, financeBetData]);
+
+  const hkTotal = useMemo(() => {
+    if (selectedCustomerId === 'default') {
+      let sum = 0;
+      customers.forEach(c => {
+        if (c.id === 'default') return;
+        const key = `HK_customer_state_${c.id}`;
+        const saved = localStorage.getItem(key) || localStorage.getItem(`customer_state_${c.id}`);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data.financeBetData) {
+            const coeffKey = `coefficient_${c.id}`;
+            const coeffSaved = localStorage.getItem(coeffKey);
+            const coeff = coeffSaved ? parseFloat(coeffSaved) : 1.0;
+            let customerSum = 0;
+            for (let i = 1; i <= 49; i++) {
+              const val = data.financeBetData[i] || 0;
+              customerSum += Math.round(val * coeff);
+            }
+            sum += customerSum;
+          }
+        }
+      });
+      return sum;
+    } else {
+      let targetBetData: Record<number, number> = {};
+      if (systemType === 'HK') {
+        targetBetData = financeBetData;
+      } else {
+        const key = `HK_customer_state_${selectedCustomerId}`;
+        const saved = localStorage.getItem(key) || localStorage.getItem(`customer_state_${selectedCustomerId}`);
+        if (saved) {
+          const data = JSON.parse(saved);
+          if (data.financeBetData) {
+            targetBetData = data.financeBetData;
+          }
+        }
+      }
+      
+      let sum = 0;
+      for (let i = 1; i <= 49; i++) {
+        sum += (targetBetData[i] || 0);
+      }
+      return sum;
+    }
+  }, [systemType, selectedCustomerId, customers, refreshCounter, financeBetData]);
+
+  const clientBothSystemsTotal = useMemo(() => {
+    return macauTotal + hkTotal;
+  }, [macauTotal, hkTotal]);
+
   // Save current customer state to specific key
   // Atomically handle switching and auto-saving
   useEffect(() => {
@@ -1448,12 +1658,14 @@ export default function App() {
         eatingHistory,
         totalTurnover: (Object.values(financeBetData) as number[]).reduce((a, b) => a + b, 0)
       };
+      
+      // Explicitly save to the current system's key
       localStorage.setItem(getSysKey(`customer_state_${lastCustomerIdRef.current}`), JSON.stringify(stateToSave));
     }
 
     // 2. Load data for the NEW customer
     if (selectedCustomerId === 'default') {
-      // 汇总模式：统计所有正式客户的总数据
+      // 汇总模式：统计所有正式客户的总数据 (仅限当前系统)
       const aggregateBetData: Record<number, number> = Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0]));
       const scaledAggregateBetData: Record<number, number> = Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0]));
       const aggregateEaten: Record<number, number> = Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0]));
@@ -1462,73 +1674,75 @@ export default function App() {
       let aggregateEatingHistory: any[] = [];
 
       customers.forEach(c => {
+        if (c.id === 'default') return;
+
+        // Force reading from the current system's prefixed key
         const key = getSysKey(`customer_state_${c.id}`);
-        const unPrefixedKey = `customer_state_${c.id}`;
-        // Read with fallback: Check prefixed key first, then un-prefixed legacy key
-        const saved = localStorage.getItem(key) || localStorage.getItem(unPrefixedKey);
+        // Fallback for migration: if prefix version doesn't exist, try getting from legacy/backup keys
+        const saved = localStorage.getItem(key) || (systemType === 'HK' ? localStorage.getItem(`customer_state_${c.id}`) : null);
         
         if (saved) {
           const data = JSON.parse(saved);
-          if (c.id !== 'default') {
-            const coeffKey = `coefficient_${c.id}`;
-            const unPrefixedCoeffKey = `coefficient_${c.id}`;
-            const coeffSaved = localStorage.getItem(coeffKey) || localStorage.getItem(unPrefixedCoeffKey);
-            const coeff = coeffSaved ? parseFloat(coeffSaved) : 1.0;
-            
-            if (data.financeBetData) {
-              Object.entries(data.financeBetData).forEach(([num, val]) => {
-                const n = parseInt(num);
-                const v = (val as number || 0);
-                const scaledVal = Math.round(v * coeff);
-                aggregateBetData[n] = (aggregateBetData[n] || 0) + v;
-                scaledAggregateBetData[n] = (scaledAggregateBetData[n] || 0) + scaledVal;
-              });
-            }
-            
-            if (data.financeRecords) {
-              const recordsWithInfo = (data.financeRecords as BetRecord[]).map(r => ({
-                ...r,
-                totalAmount: Math.round((r.totalAmount || 0) * coeff),
-                items: (r.items || []).map((it: any) => ({
-                  ...it,
-                  amount: Math.round((it.amount || 0) * coeff)
-                })),
-                id: r.id || Math.random().toString(36).substr(2, 9),
-                customerId: r.customerId || c.id,
-                customerName: r.customerName || c.name,
-                timestamp: r.timestamp || (r.time ? new Date().setHours(...(r.time.split(':').map(Number) as [number, number, number])) : Date.now())
-              }));
-              aggregateFinanceRecords = [...aggregateFinanceRecords, ...recordsWithInfo];
-            }
-            
-            if (data.compoundRecords) {
-              const recordsWithInfo = (data.compoundRecords as BetRecord[]).map(r => ({
-                ...r,
-                totalAmount: Math.round((r.totalAmount || 0) * coeff),
-                items: (r.items || []).map((it: any) => ({
-                  ...it,
-                  amount: Math.round((it.amount || 0) * coeff)
-                })),
-                id: r.id || Math.random().toString(36).substr(2, 9),
-                customerId: r.customerId || c.id,
-                customerName: r.customerName || c.name,
-                timestamp: r.timestamp || (r.time ? new Date().setHours(...(r.time.split(':').map(Number) as [number, number, number])) : Date.now())
-              }));
-              aggregateCompoundRecords = [...aggregateCompoundRecords, ...recordsWithInfo];
-            }
+          const coeffKey = `coefficient_${c.id}`;
+          const coeffSaved = localStorage.getItem(coeffKey);
+          const coeff = coeffSaved ? parseFloat(coeffSaved) : 1.0;
+          
+          if (data.financeBetData) {
+            Object.entries(data.financeBetData).forEach(([num, val]) => {
+              const n = parseInt(num);
+              const v = (val as number || 0);
+              const scaledVal = Math.round(v * coeff);
+              aggregateBetData[n] = (aggregateBetData[n] || 0) + v;
+              scaledAggregateBetData[n] = (scaledAggregateBetData[n] || 0) + scaledVal;
+            });
           }
           
-          if (c.id === 'default') {
-            if (data.eatenAmounts) {
-              Object.entries(data.eatenAmounts).forEach(([num, val]) => {
-                const n = parseInt(num);
-                aggregateEaten[n] = (val as number || 0);
-              });
-            }
-            if (data.eatingHistory) aggregateEatingHistory = data.eatingHistory;
+          if (data.financeRecords) {
+            const recordsWithInfo = (data.financeRecords as BetRecord[]).map(r => ({
+              ...r,
+              totalAmount: Math.round((r.totalAmount || 0) * coeff),
+              items: (r.items || []).map((it: any) => ({
+                ...it,
+                amount: it.isSplitAmount ? ((it.amount || 0) * coeff) : Math.round((it.amount || 0) * coeff)
+              })),
+              id: r.id || Math.random().toString(36).substr(2, 9),
+              customerId: r.customerId || c.id,
+              customerName: r.customerName || c.name,
+              timestamp: r.timestamp || (r.time ? new Date().setHours(...(r.time.split(':').map(Number) as [number, number, number])) : Date.now())
+            }));
+            aggregateFinanceRecords = [...aggregateFinanceRecords, ...recordsWithInfo];
+          }
+          
+          if (data.compoundRecords) {
+            const recordsWithInfo = (data.compoundRecords as BetRecord[]).map(r => ({
+              ...r,
+              totalAmount: Math.round((r.totalAmount || 0) * coeff),
+              items: (r.items || []).map((it: any) => ({
+                ...it,
+                amount: it.isSplitAmount ? ((it.amount || 0) * coeff) : Math.round((it.amount || 0) * coeff)
+              })),
+              id: r.id || Math.random().toString(36).substr(2, 9),
+              customerId: r.customerId || c.id,
+              customerName: r.customerName || c.name,
+              timestamp: r.timestamp || (r.time ? new Date().setHours(...(r.time.split(':').map(Number) as [number, number, number])) : Date.now())
+            }));
+            aggregateCompoundRecords = [...aggregateCompoundRecords, ...recordsWithInfo];
           }
         }
       });
+
+      // Special handling for shared summary state (Eaten, eating history)
+      const summaryStateKey = getSysKey('customer_summary_state');
+      const savedSummary = localStorage.getItem(summaryStateKey);
+      if (savedSummary) {
+        const sData = JSON.parse(savedSummary);
+        if (sData.eatenAmounts) {
+          Object.entries(sData.eatenAmounts).forEach(([num, val]) => {
+            aggregateEaten[parseInt(num)] = (val as number || 0);
+          });
+        }
+        if (sData.eatingHistory) aggregateEatingHistory = sData.eatingHistory;
+      }
 
       setFinanceBetData(aggregateBetData);
       setScaledBetData(scaledAggregateBetData);
@@ -1536,7 +1750,6 @@ export default function App() {
       setFinanceRecords(aggregateFinanceRecords.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       setCompoundRecords(aggregateCompoundRecords.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       setEatingHistory(aggregateEatingHistory.sort((a, b) => {
-        // Fallback for sorting eating history
         const timeA = a.time ? new Date().setHours(...(a.time.split(':').map(Number) as [number, number, number])) : 0;
         const timeB = b.time ? new Date().setHours(...(b.time.split(':').map(Number) as [number, number, number])) : 0;
         return timeB - timeA;
@@ -1580,14 +1793,19 @@ export default function App() {
       if (isSwitchingRef.current) return;
 
       const stateToSave = {
-        financeBetData,
+        financeBetData: selectedCustomerId === 'default' ? {} : financeBetData, // Summary bet data is aggregate, don't persist it as a base
         eatenAmounts,
-        financeRecords,
-        compoundRecords,
+        financeRecords: selectedCustomerId === 'default' ? [] : financeRecords,
+        compoundRecords: selectedCustomerId === 'default' ? [] : compoundRecords,
         eatingHistory,
         totalTurnover: (Object.values(financeBetData) as number[]).reduce((a, b) => a + b, 0)
       };
-      localStorage.setItem(getSysKey(`customer_state_${selectedCustomerId}`), JSON.stringify(stateToSave));
+      
+      const saveKey = selectedCustomerId === 'default' 
+        ? getSysKey('customer_summary_state') 
+        : getSysKey(`customer_state_${selectedCustomerId}`);
+        
+      localStorage.setItem(saveKey, JSON.stringify(stateToSave));
     }, 1000);
     
     return () => clearTimeout(timer);
@@ -1738,6 +1956,163 @@ export default function App() {
     setEatingHistory([]);
   };
 
+  const triggerClearAndPaste = useCallback(async () => {
+    if (!clearConfirmActive) {
+      // 1. 无阻塞内联二次确认为主，点击后进入 3s 倒计时确认闪烁
+      setClearConfirmActive(true);
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = setTimeout(() => {
+        setClearConfirmActive(false);
+      }, 3000);
+
+      // 把焦点归还并锁定至对应工作文本框，保障极高输入流畅度
+      if (standaloneMode) {
+        window.focus();
+        standaloneInputRef.current?.focus();
+      } else {
+        modalInputRef.current?.focus();
+      }
+      return;
+    }
+
+    // 2. 3秒内第二次点击触发，直接取消状态并开始物理全量级清理
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    setClearConfirmActive(false);
+
+    // 1. 设置标记防止自动保存干扰，但允许输入逻辑运行
+    isSwitchingRef.current = true;
+    
+    // 强制先失焦再聚焦，并在清除发生时重置活跃状态
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    if (standaloneMode) {
+      window.focus();
+      standaloneInputRef.current?.focus();
+    } else {
+      modalInputRef.current?.focus();
+    }
+
+    // 2. 准备空状态
+    const emptyBet: Record<number, number> = {};
+    for (let i = 1; i <= 49; i++) emptyBet[i] = 0;
+    const emptyState = {
+      financeBetData: emptyBet,
+      eatenAmounts: {},
+      financeRecords: [],
+      compoundRecords: [],
+      eatingHistory: [],
+      totalTurnover: 0
+    };
+
+    // 3. 物理爆破本地存储中所有的业务数据键（不分系统，全量扫描）
+    try {
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        // 抹除所有客户状态、汇总状态、以及包含下注/流水/吃码字样的键
+        if (
+          key.includes('customer_state_') || 
+          key.includes('customer_summary_state') ||
+          key.includes('financeBetData') ||
+          key.includes('financeRecords') ||
+          key.includes('compoundRecords') ||
+          key.includes('eatingHistory') ||
+          key.includes('eatenAmounts') ||
+          key.includes('modalInputValue')
+        ) {
+          if (key.includes('financeBetData')) {
+            localStorage.setItem(key, JSON.stringify(emptyBet));
+          } else if (key.includes('eatenAmounts')) {
+            localStorage.setItem(key, '{}');
+          } else if (key.includes('modalInputValue')) {
+            localStorage.setItem(key, '');
+          } else {
+            localStorage.setItem(key, key.includes('customer_') ? JSON.stringify(emptyState) : '[]');
+          }
+        }
+      });
+
+      // 4. 【核心修复】发送全局内存熔断信号，强制主窗口和其它所有系统窗口同步清空内存，防止“李四”数据回秒
+      const resetSignal = { keepRisk: true, keepSpecial: true, isGlobal: true, timestamp: Date.now() };
+      localStorage.setItem('LOTTERY_RESET_REQUEST', JSON.stringify(resetSignal));
+      localStorage.setItem('MO_LOTTERY_RESET_REQUEST', JSON.stringify(resetSignal));
+      localStorage.setItem('HK_LOTTERY_RESET_REQUEST', JSON.stringify(resetSignal));
+      
+      // 5. 立即执行本地重置函数（如果是主窗口调用）
+      handleReset(true, true, undefined, true);
+      handleResetEaten();
+    } catch (e) {
+      console.error('Master Wipe Failed', e);
+    }
+
+    // 6. 抹除当前窗口所有的状态变量
+    setFinanceBetData(emptyBet);
+    setFinanceRecords([]);
+    setCompoundRecords([]);
+    setEatenAmounts({});
+    setEatingHistory([]);
+    if (typeof setScaledBetData === 'function') setScaledBetData({});
+
+    // 6. 处理粘贴
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const cleanedText = finalCleanText(text);
+          setModalInputValue(cleanedText);
+          if (typeof setLocalModalValue === 'function') setLocalModalValue(cleanedText);
+        } else {
+          setModalInputValue('');
+          if (typeof setLocalModalValue === 'function') setLocalModalValue('');
+        }
+      } else {
+        setModalInputValue('');
+        if (typeof setLocalModalValue === 'function') setLocalModalValue('');
+      }
+    } catch (err) {
+      console.warn('Clipboard failed');
+      setModalInputValue('');
+      if (typeof setLocalModalValue === 'function') setLocalModalValue('');
+    }
+
+    // 7. 仅在极端超长文本粘贴时重新挂载输入框以刷新滚动，清空时绝不销毁 DOM 节点
+    // 这样能彻底避免 DOM 重建引起的原生输入框失去与操作系统的焦点环绑定（Focus Ring）
+    const currentLength = modalInputValue ? modalInputValue.length : 0;
+    if (currentLength > 1000) {
+      setTextareaKey(prev => prev + 1);
+    }
+    setRefreshCounter(prev => prev + 1);
+    setLastSubmittedModalValue('');
+    
+    // 8. 多阶段物理级抗干扰聚焦保障
+    const attemptFocus = () => {
+      const targetInput = standaloneMode ? standaloneInputRef.current : modalInputRef.current;
+      if (targetInput) {
+        if (standaloneMode) window.focus();
+        targetInput.focus();
+        // 物理聚焦并强制移动光标到最后，重置原生编辑输入态
+        const len = targetInput.value.length;
+        targetInput.setSelectionRange(len, len);
+      }
+    };
+
+    // 立即在数据写入瞬间尝试重新聚焦
+    attemptFocus();
+
+    // 在 50ms、150ms、300ms 节点提供分级多次聚焦，极大抵抗 Electron 或 confirm 窗返回后的窗口聚焦延迟
+    setTimeout(attemptFocus, 50);
+    setTimeout(attemptFocus, 150);
+    setTimeout(attemptFocus, 300);
+
+    setTimeout(() => {
+      isSwitchingRef.current = false;
+      attemptFocus();
+    }, 500);
+
+    console.log('Global Clear Mode: System Activated with Re-render');
+  }, [setFinanceBetData, setFinanceRecords, setCompoundRecords, setEatenAmounts, setEatingHistory, handleReset, handleResetEaten, setModalInputValue, setLocalModalValue, standaloneMode, setTextareaKey]);
+
   const handleAddCustomerSubmit = () => {
     if (!newCustomerName.trim()) return;
     const newId = 'cust_' + Date.now();
@@ -1795,7 +2170,12 @@ export default function App() {
     if (window.confirm('确认删除该客户及其所有下注记录吗？此操作不可恢复。')) {
       const newCusts = customers.filter(c => c.id !== idValue);
       setCustomers(newCusts);
-      localStorage.removeItem(getSysKey(`customer_state_${idValue}`));
+      
+      // Remove from both HK and MO systems
+      localStorage.removeItem(`HK_customer_state_${idValue}`);
+      localStorage.removeItem(`MO_customer_state_${idValue}`);
+      localStorage.removeItem(`customer_state_${idValue}`); // legacy
+      localStorage.removeItem(`coefficient_${idValue}`);
       
       if (selectedCustomerId === idValue) {
         setSelectedCustomerId('default');
@@ -1812,7 +2192,7 @@ export default function App() {
     if (!metaRecord) {
       for (const c of customers) {
         if (c.id === 'default') continue;
-        const savedHK = localStorage.getItem(`customer_state_${c.id}`);
+        const savedHK = localStorage.getItem(`HK_customer_state_${c.id}`) || localStorage.getItem(`customer_state_${c.id}`);
         const savedMO = localStorage.getItem(`MO_customer_state_${c.id}`);
         for (const s of [savedHK, savedMO]) {
           if (!s) continue;
@@ -1837,9 +2217,14 @@ export default function App() {
     const systemsToCheck: ('HK' | 'MO')[] = ['HK', 'MO'];
     
     systemsToCheck.forEach(sys => {
-      const sysPrefix = sys === 'MO' ? 'MO_' : '';
+      const sysPrefix = sys === 'MO' ? 'MO_' : 'HK_';
       const key = `${sysPrefix}customer_state_${targetCustomerId}`;
-      const saved = localStorage.getItem(key);
+      let saved = localStorage.getItem(key);
+      
+      // Fallback only for HK migration
+      if (!saved && sys === 'HK') {
+        saved = localStorage.getItem(`customer_state_${targetCustomerId}`);
+      }
       if (saved) {
         try {
           const data = JSON.parse(saved);
@@ -1854,7 +2239,8 @@ export default function App() {
               if (!item.system || item.system === sys) {
                 item.targets.forEach((num: number) => {
                   if (data.financeBetData && data.financeBetData[num] !== undefined) {
-                    data.financeBetData[num] = Math.max(0, Math.round((data.financeBetData[num] || 0) - item.amount));
+                    const amountToSub = item.isSplitAmount ? Math.floor(item.amount) : item.amount;
+                    data.financeBetData[num] = Math.round(((data.financeBetData[num] || 0) - amountToSub) * 100) / 100;
                   }
                 });
               }
@@ -2129,7 +2515,8 @@ export default function App() {
               items.push({
                 targets: res.numbers,
                 amount: grossAmount,
-                raw: res.raw
+                raw: res.raw,
+                isSplitAmount: res.isSplitAmount
               });
             });
           }
@@ -2142,13 +2529,16 @@ export default function App() {
              items.forEach(it => { groupedByRaw[it.raw] = (groupedByRaw[it.raw] || 0) + it.amount; });
              segmentPreview = Object.entries(groupedByRaw).map(([raw, amt]) => {
                const subTotal = Math.abs(amt); 
-               return `${raw} 各${amt}（合计：${subTotal}）`;
+               const hasSplit = items.some(it => it.raw === raw && it.isSplitAmount);
+               const suffix = hasSplit ? '（向下取整）' : '';
+               return `${raw} 各${amt}（合计：${subTotal}）${suffix}`;
              }).join(' | ');
           } else {
              // 05-10 修改：完全尊重识别顺序，不再按金额排序，也不再聚合不同位置的同金额片段
              segmentPreview = items.map(it => {
                const subTotal = Math.abs(it.amount) * it.targets.length;
-               return `${it.raw} 各${it.amount}（合计：${subTotal}）`;
+               const suffix = it.isSplitAmount ? '（向下取整）' : '';
+               return `${it.raw} 各${it.amount}（合计：${subTotal}）${suffix}`;
              }).join(' | ');
           }
 
@@ -2227,16 +2617,16 @@ export default function App() {
     systemsToUpdate.forEach(sys => {
       try {
         const sysItems = allParsedItems.filter(p => p.system === sys).flatMap(p => p.items);
-      const sysPrefix = sys === 'MO' ? 'MO_' : '';
-      const targetKey = `${sysPrefix}customer_state_${actualTargetId}`;
-      const saved = localStorage.getItem(targetKey);
-      
-      let data = saved ? JSON.parse(saved) : { 
-          financeBetData: Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])),
-          financeRecords: [],
-          compoundRecords: [],
-          eatenAmounts: {}
-      };
+        const sysPrefix = sys === 'MO' ? 'MO_' : 'HK_';
+        const targetKey = `${sysPrefix}customer_state_${actualTargetId}`;
+        const saved = localStorage.getItem(targetKey) || (sys === 'HK' ? localStorage.getItem(`customer_state_${actualTargetId}`) : null);
+        
+        let data = saved ? JSON.parse(saved) : { 
+            financeBetData: Object.fromEntries(Array.from({ length: 49 }, (_, i) => [i + 1, 0])),
+            financeRecords: [],
+            compoundRecords: [],
+            eatenAmounts: {}
+        };
 
       // 无论此系统是否有下注，都同步共享流水历史
       if (activeView === 'compound') {
@@ -2248,7 +2638,8 @@ export default function App() {
         // 仅在本系统的矩阵中增加具体下注
         sysItems.forEach(it => {
           it.targets.forEach(num => {
-            data.financeBetData[num] = Math.max(0, Math.round((data.financeBetData[num] || 0) + it.amount));
+            const amountToAdd = it.isSplitAmount ? Math.floor(it.amount) : it.amount;
+            data.financeBetData[num] = Math.round(((data.financeBetData[num] || 0) + amountToAdd) * 100) / 100;
           });
         });
 
@@ -2294,8 +2685,9 @@ export default function App() {
           handleReset(true, true, undefined, true);
           handleResetEaten();
         }
-        setModalInputValue(text);
-        setLocalModalValue(text);
+        const cleanedText = finalCleanText(text);
+        setModalInputValue(cleanedText);
+        setLocalModalValue(cleanedText);
       }
     } catch (err) {
       console.error('Clipboard read error:', err);
@@ -2443,68 +2835,80 @@ export default function App() {
   };
 
   const handleClearBoard = () => {
-    const message = selectedCustomerId === 'default' 
-      ? '确定要清空所有客户的所有下注记录吗？此操作不可撤销。'
-      : '确定要清空该客户的所有下注记录吗？此操作不可撤销。';                
-    
-    // Check setting requireUndoPasteConfirm if needed
-    if (requireUndoPasteConfirm && !window.confirm(message)) {
-        return;
-    } else if (!requireUndoPasteConfirm) {
-        // If setting is off, maybe we don't confirm? Or just standard confirm? 
-        // User said link with the setting. Assuming it means skip confirm if false.
-        // Actually, previous implementation forced confirm.
-        // Let's keep it simple: if requireUndoPasteConfirm is true, confirm. 
-        // Otherwise proceed directly? Or keep mandatory confirm for this drastic action?
-        // Let's allow skipping if not required. 
-        // Wait, '清空面板' is dangerous. 
-        // The user said: "联动设置中之前的清空数据并粘贴弹窗的开关".
-        // Let's implement this: if switch is true, confirm. If switch is false, proceed directly.
-        // But let's be safe and confirm if it's 'default' (all customers) regardless?
-        // No, follow instructions strictly. 
+    if (selectedCustomerId === 'default') {
+      if (window.confirm('确定要清空【所有客户】的双系统（香港+澳门）所有录入数据、流水和账目吗？此操作不可逆。')) {
+        isSwitchingRef.current = true;
+
+        const emptyBet: Record<number, number> = {};
+        for (let i = 1; i <= 49; i++) emptyBet[i] = 0;
+
+        // 1. 清除大盘自身的 business 字段
+        const systems = ['', 'MO_', 'HK_'];
+        systems.forEach(p => {
+          localStorage.setItem(`${p}financeBetData`, JSON.stringify(emptyBet));
+          localStorage.setItem(`${p}financeRecords`, JSON.stringify([]));
+          localStorage.setItem(`${p}compoundRecords`, JSON.stringify([]));
+          localStorage.setItem(`${p}eatingHistory`, JSON.stringify([]));
+          localStorage.setItem(`${p}eatenAmounts`, JSON.stringify({}));
+        });
+
+        // 2. 清除所有子客户的数据，但不删除客户本身
+        customers.forEach(customer => {
+          if (customer.id !== 'default') {
+            const emptyState = {
+              financeBetData: emptyBet,
+              eatenAmounts: {},
+              financeRecords: [],
+              compoundRecords: [],
+              eatingHistory: [],
+              totalTurnover: 0
+            };
+            localStorage.setItem(`customer_state_${customer.id}`, JSON.stringify(emptyState));
+            localStorage.setItem(`MO_customer_state_${customer.id}`, JSON.stringify(emptyState));
+            localStorage.setItem(`HK_customer_state_${customer.id}`, JSON.stringify(emptyState));
+          }
+        });
+
+        // 3. 重置内存状态
+        setFinanceBetData(emptyBet);
+        setFinanceRecords([]);
+        setCompoundRecords([]);
+        setEatingHistory([]);
+        setEatenAmounts({});
+        if (typeof setScaledBetData === 'function') {
+          setScaledBetData({});
+        }
+
+        if (typeof setLastSubmittedModalValue === 'function') {
+          setLastSubmittedModalValue('');
+        }
+
+        setError(null);
+        setRefreshCounter(prev => prev + 1);
+
+        setTimeout(() => {
+          isSwitchingRef.current = false;
+        }, 1000);
+      }
+      return;
     }
 
-    if (!requireUndoPasteConfirm || window.confirm(message)) {
-      const emptyBet: Record<number, number> = {};
-      for (let i = 1; i <= 49; i++) emptyBet[i] = 0;
-      
-      setFinanceBetData(emptyBet);
-      setFinanceRecords([]);
-      setCompoundRecords([]);
-      setEatingHistory([]);
-      setEatenAmounts({});
-      
-      // Immediate persistence for BOTH systems (HK and MO)
-      const clearInSystem = (prefix: string) => {
-        const emptyState = {
-          financeBetData: emptyBet,
-          eatenAmounts: {},
-          financeRecords: [],
-          compoundRecords: [],
-          eatingHistory: [],
-          totalTurnover: 0
-        };
+    const currentCustomer = customers.find(c => c.id === selectedCustomerId);
+    const customerName = currentCustomer ? currentCustomer.name : '该客户';
 
-        if (selectedCustomerId && selectedCustomerId !== 'default') {
-          const stateKey = `${prefix}customer_state_${selectedCustomerId}`;
-          localStorage.setItem(stateKey, JSON.stringify(emptyState));
-        } else if (selectedCustomerId === 'default') {
-          localStorage.setItem(`${prefix}financeBetData`, JSON.stringify(emptyBet));
-          localStorage.setItem(`${prefix}financeRecords`, JSON.stringify([]));
-          localStorage.setItem(`${prefix}compoundRecords`, JSON.stringify([]));
-          localStorage.setItem(`${prefix}eatingHistory`, JSON.stringify([]));
-          localStorage.setItem(`${prefix}eatenAmounts`, JSON.stringify({}));
-          
-          customers.forEach(customer => {
-             localStorage.setItem(`${prefix}customer_state_${customer.id}`, JSON.stringify(emptyState));
-          });
-        }
-      };
+    if (window.confirm(`确定要清空当前客户【${customerName}】的双系统（香港+澳门）所有录入数据、流水和账目吗？此操作不可逆。`)) {
+      isSwitchingRef.current = true;
 
-      clearInSystem('');    // HK (Legacy/Default)
-      clearInSystem('MO_'); // MO
+      // 调用 handleReset 进行当前选定客户的局部物理和内存状态清理，且 keepRiskNumbers=true, keepSpecialNumbers=true 保护特码和风险拦截系统
+      handleReset(true, true, selectedCustomerId);
+
+      if (typeof setLastSubmittedModalValue === 'function') {
+        setLastSubmittedModalValue('');
+      }
+      setError(null);
     }
   };
+
 
   const handleExport = () => {
     try {
@@ -2609,7 +3013,8 @@ export default function App() {
                 if (targetSpecial && targetSpecial > 0) {
                   h = item.targets.filter((t: any) => t === targetSpecial).length;
                 }
-                itemWin = Math.abs(item.amount) * h;
+                const rawEarn = Math.abs(item.amount) * h;
+                itemWin = item.isSplitAmount ? Math.floor(rawEarn) : rawEarn;
               } else {
                 const draw = (itemSys === 'MO' || itemSys === '澳') 
                   ? { reg: moDraw.slice(0, 6).filter((n): n is number => n !== null), spec: moDraw[6] }
@@ -2939,7 +3344,8 @@ export default function App() {
             const count = res.numbers.length;
             const total = count * res.amount;
             grandTotal += total;
-            const lineText = `${res.raw} 各${res.amount}（合计：${total}）`;
+            const suffix = res.isSplitAmount ? '（向下取整）' : '';
+            const lineText = `${res.raw} 各${res.amount}（合计：${total}）${suffix}`;
             rawLines.push(`${lineText} [${systemChar}]`);
 
             const matchCount = getRiskMatchCount(res.numbers, system);
@@ -2951,7 +3357,7 @@ export default function App() {
                 <span className="mr-1">[{systemChar}]</span>
                 {renderHighlightedText(res.raw, system)}
                 <span className={`opacity-70 ml-1 ${isHighRisk ? 'text-red-500' : ''}`}>
-                  各{res.amount}（合计：{total}）
+                  各{res.amount}（合计：{total}）{suffix}
                 </span>
               </div>
             );
@@ -2998,7 +3404,6 @@ export default function App() {
         previewScrollRef={previewScrollRef}
         systemType={systemType}
         switchSystem={switchSystem}
-        onClearBoard={handleClearBoard}
         isSwitchingSystem={isSwitchingSystem}
         popOutTargetId={popOutTargetId}
         setPopOutTargetId={setPopOutTargetId}
@@ -3010,9 +3415,13 @@ export default function App() {
         dragControls={dragControls}
         handlePasteAndRecognize={handlePasteAndRecognize}
         triggerLastUndo={triggerLastUndo}
-
         setIsModalOpen={setIsModalOpen}
         error={error}
+        triggerClearAndPaste={triggerClearAndPaste}
+        clearConfirmActive={clearConfirmActive}
+        ocrLoading={ocrLoading}
+        ocrProgress={ocrProgress}
+        processImageFile={processImageFile}
       />
     );
   }, [
@@ -3036,7 +3445,11 @@ export default function App() {
     handlePopOut,
     handlePasteAndRecognize,
     triggerLastUndo,
-    handleClearBoard,
+    triggerClearAndPaste,
+    clearConfirmActive,
+    ocrLoading,
+    ocrProgress,
+    processImageFile,
 
     setLocalModalValue,
     setLastSubmittedModalValue,
@@ -3156,18 +3569,6 @@ export default function App() {
 
             <div className="flex items-center justify-between">
               <div>
-                <label className="text-xs font-mono font-bold uppercase tracking-widest block">开启撤销并粘贴确认弹窗</label>
-              </div>
-              <button 
-                onClick={() => setTempRequireUndoPasteConfirm(!tempRequireUndoPasteConfirm)}
-                className={`w-10 h-5 rounded-full transition-colors relative ${tempRequireUndoPasteConfirm ? 'bg-indigo-600' : 'bg-gray-300'}`}
-              >
-                <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempRequireUndoPasteConfirm ? 'left-6' : 'left-1'}`} />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
                 <label className="text-xs font-mono font-bold uppercase tracking-widest block">复制后自动粘贴</label>
               </div>
               <button 
@@ -3179,11 +3580,76 @@ export default function App() {
             </div>
           </div>
 
+          {/* 智能图片识别大模型 OCR 设置 */}
+          <div className="space-y-4 pt-4 border-t border-gray-100">
+            <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-gray-400">智能图片识别 (OCR)</h4>
+            
+            <div className="space-y-2">
+              <label className="text-xs font-mono font-bold uppercase tracking-widest block">识别引擎</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTempOcrEngine('paddle')}
+                  className={`py-2 px-3 border-2 font-mono text-xs font-bold uppercase transition-all ${
+                    tempOcrEngine === 'paddle'
+                      ? 'border-[#141414] bg-[#141414] text-white'
+                      : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  本地 OCR (Paddle)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTempOcrEngine('gemini')}
+                  className={`py-2 px-3 border-2 font-mono text-xs font-bold uppercase transition-all ${
+                    tempOcrEngine === 'gemini'
+                      ? 'border-[#141414] bg-[#141414] text-white'
+                      : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  Gemini 大模型
+                </button>
+              </div>
+              <p className="text-[10px] font-mono opacity-40">本地 PaddleOCR 软件离线识别，或使用全球领先的 Gemini 大模型精确解析下注数据。</p>
+            </div>
+
+            {tempOcrEngine === 'gemini' && (
+              <div className="space-y-4 pt-2">
+                <div className="space-y-2">
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">Gemini API Key</label>
+                  <input
+                    type="password"
+                    value={tempGeminiApiKey}
+                    onChange={(e) => setTempGeminiApiKey(e.target.value)}
+                    placeholder="输入您的 Google Gemini API 密钥"
+                    className="w-full p-3 font-mono text-xs border-2 border-[#141414] focus:outline-none focus:bg-gray-50"
+                  />
+                  <div className="flex justify-between items-center text-[9px] font-mono opacity-50">
+                    <span>密钥将 100% 仅保存在您的本地个人环境</span>
+                    <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="underline text-indigo-600 font-bold hover:text-indigo-800">[获取免费 API Key]</a>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-mono font-bold uppercase tracking-widest block">大模型版本</label>
+                  <select
+                    value={tempGeminiModel}
+                    onChange={(e) => setTempGeminiModel(e.target.value)}
+                    className="w-full p-3 font-mono text-xs border-2 border-[#141414] bg-white focus:outline-none focus:bg-gray-50 cursor-pointer"
+                  >
+                    <option value="gemini-2.5-flash">gemini-2.5-flash (推荐：高性价比)</option>
+                    <option value="gemini-2.5-pro">gemini-2.5-pro (超强手写复杂排版分析)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-4 pt-2 border-t border-gray-100">
             <div className="flex items-center justify-between">
               <div>
                 <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                <p className="text-[10px] font-mono opacity-40">紧凑模式 (730x620)</p>
+                <p className="text-[10px] font-mono opacity-40">紧凑模式 (730x658)</p>
               </div>
               <button 
                 onClick={() => {
@@ -3191,7 +3657,7 @@ export default function App() {
                   setTempCompactMode(next);
                   if (next) {
                     setTempWidth(730);
-                    setTempHeight(620);
+                    setTempHeight(658);
                   } else {
                     setTempWidth(1420);
                     setTempHeight(903);
@@ -3234,10 +3700,12 @@ export default function App() {
               setEnableSearchUndo(tempEnableSearchUndo);
               setSmartSystemRecognition(tempSmartSystemRecognition);
               setRequireUndoConfirm(tempRequireUndoConfirm);
-              setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
               setAutoPasteEnabled(tempAutoPasteEnabled);
               setFollowCustomerRisk(tempFollowCustomerRisk);
               setEnableCustomerEatingReport(tempEnableCustomerEatingReport);
+              setOcrEngine(tempOcrEngine);
+              setGeminiApiKey(tempGeminiApiKey);
+              setGeminiModel(tempGeminiModel);
               
               // Physical Sync to localStorage
               localStorage.setItem(getSysKey('odds'), tempOdds.toString());
@@ -3245,13 +3713,15 @@ export default function App() {
               localStorage.setItem(getSysKey('enableSearchUndo'), tempEnableSearchUndo.toString());
               localStorage.setItem(getSysKey('smartSystemRecognition'), tempSmartSystemRecognition.toString());
               localStorage.setItem(getSysKey('requireUndoConfirm'), tempRequireUndoConfirm.toString());
-              localStorage.setItem(getSysKey('requireUndoPasteConfirm'), tempRequireUndoPasteConfirm.toString());
               localStorage.setItem(getSysKey('autoPasteEnabled'), tempAutoPasteEnabled.toString());
               localStorage.setItem(getSysKey('followCustomerRisk'), tempFollowCustomerRisk.toString());
               localStorage.setItem(getSysKey('enableCustomerEatingReport'), tempEnableCustomerEatingReport.toString());
               localStorage.setItem('isCompactMode', tempCompactMode.toString());
               localStorage.setItem('customWidth', tempWidth.toString());
               localStorage.setItem('customHeight', tempHeight.toString());
+              localStorage.setItem('ocr_engine', tempOcrEngine);
+              localStorage.setItem('gemini_api_key', tempGeminiApiKey);
+              localStorage.setItem('gemini_model', tempGeminiModel);
               
               if (window.electron) {
                 window.electron.send('resize-main-window', { width: tempWidth, height: tempHeight });
@@ -3270,14 +3740,15 @@ export default function App() {
   if (standaloneMode) {
     return (
       <div className="fixed inset-0 bg-[#F2F1ED] p-4 flex flex-col font-sans tracking-tight overflow-hidden">
-        <div className="flex items-center justify-between border-b-2 border-[#141414] pb-2 mb-4">
-          <div className="flex items-center gap-2">
+        <div 
+          className="flex items-center justify-between border-b-2 border-[#141414] pb-2 mb-4 shrink-0 select-none"
+          style={{ WebkitAppRegion: 'drag' } as any}
+        >
+          <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as any}>
             <Calculator size={18} />
-            <h3 className="text-xl font-serif italic font-bold">
-              {modalMode === 'deduct' ? '智能扣除助手' : '智能录入助手'}
-            </h3>
+            <span className="text-xl font-serif italic font-bold">智能录入助手</span>
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as any}>
             <span className="text-[10px] font-mono font-bold text-white px-2 py-0.5 bg-blue-600 uppercase flex items-center gap-1">
               <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
               Smart Capture
@@ -3288,11 +3759,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
-          <div className="flex-1 flex flex-col space-y-1 min-h-0">
+        <div className="flex-1 flex flex-col gap-4 min-h-0 min-w-0 select-text" style={{ WebkitAppRegion: 'no-drag' } as any}>
+          <div className="flex-1 flex flex-col space-y-1 min-h-0 relative">
             <div className="flex justify-between items-center">
               <label className="text-lg font-serif font-bold italic">需识别文字:</label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 <span className="text-[10px] font-mono font-bold uppercase">录入给:</span>
                 <select 
                   value={popOutTargetId}
@@ -3307,11 +3778,46 @@ export default function App() {
                 </select>
               </div>
             </div>
+            {ocrLoading && (
+              <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center p-4 border-2 border-dashed border-indigo-500 animate-pulse">
+                <div className="text-sm font-mono font-bold text-indigo-700 mb-1">📷 {ocrProgress}</div>
+                <div className="text-[10px] text-gray-400 font-mono">离线安全通道：100% 物理级单机解析，不消耗外部网络流量</div>
+              </div>
+            )}
             <textarea
-              ref={modalInputRef}
-              autoFocus
+              key={textareaKey}
+              ref={standaloneInputRef}
               value={modalInputValue}
-              onChange={(e) => setModalInputValue(e.target.value)}
+              autoFocus
+              spellCheck={false}
+              onChange={(e) => {
+                setModalInputValue(e.target.value);
+                setLocalModalValue(e.target.value);
+              }}
+              onPaste={async (e) => {
+                const items = e.clipboardData.items;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    if (file) {
+                      e.preventDefault();
+                      await processImageFile(file);
+                    }
+                  }
+                }
+              }}
+              onDragOver={(e) => { e.preventDefault(); setStandaloneIsDragging(true); }}
+              onDragLeave={() => setStandaloneIsDragging(false)}
+              onDrop={async (e) => {
+                e.preventDefault();
+                setStandaloneIsDragging(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  const file = e.dataTransfer.files[0];
+                  if (file.type.startsWith('image/')) {
+                    await processImageFile(file);
+                  }
+                }
+              }}
               onKeyDown={(e) => {
                 if (showLastUndoConfirm) return;
                 if (e.key === 'Enter' && e.shiftKey) {
@@ -3319,8 +3825,22 @@ export default function App() {
                   handleParse(false, modalInputValue);
                 }
               }}
-              placeholder="请在此输入内容..."
-              className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 focus:outline-none bg-white resize-none shadow-inner"
+              onPointerDown={(e) => {
+                // 彻底阻止冒泡并强制聚焦
+                e.stopPropagation();
+                window.focus();
+                e.currentTarget.focus();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                window.focus();
+                standaloneInputRef.current?.focus();
+              }}
+              placeholder={standaloneIsDragging ? "松开鼠标载入并识别图片内容 (PaddleOCR-json)..." : "请在此输入内容（支持直接粘贴截图或拖入图片文件进行本地OCR极速识别）..."}
+              className={`w-full flex-1 p-3 font-mono text-base border-2 focus:border-blue-500 focus:outline-none transition-all resize-none shadow-inner cursor-text relative z-10 ${
+                standaloneIsDragging ? "border-dashed border-indigo-500 bg-indigo-50/50 scale-[0.99]" : "border-gray-400 bg-white"
+              }`}
+              style={{ WebkitAppRegion: 'no-drag', caretColor: '#141414', userSelect: 'text', WebkitUserSelect: 'text' } as any}
             />
           </div>
 
@@ -3349,15 +3869,25 @@ export default function App() {
             <button onClick={() => handlePasteAndRecognize()} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">粘贴识别</button>
             <button 
               onClick={() => {
-                modalInputRef.current?.focus();
+                standaloneInputRef.current?.focus();
                 setLastSubmittedModalValue('');
               }} 
               className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap"
             >
               重新识别
             </button>
-            <button onClick={() => setModalInputValue('')} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">清空</button>
+            <button onClick={() => setModalInputValue('')} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">清内容</button>
             <button onClick={triggerLastUndo} className="bg-white hover:bg-gray-100 border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap">撤销</button>
+            <button 
+              onClick={() => triggerClearAndPaste()}
+              className={`${
+                clearConfirmActive 
+                  ? "bg-red-600 hover:bg-red-700 border-red-700 text-white animate-pulse" 
+                  : "bg-amber-100 hover:bg-amber-200 border-amber-400 text-amber-900 active:bg-amber-300"
+              } border py-2.5 text-[10px] font-bold transition-all rounded-none shadow-sm whitespace-nowrap font-bold`}
+            >
+              {clearConfirmActive ? '⚠️ 再次点击确认清空！' : '清空数据并粘贴'}
+            </button>
           </div>
           
           <div className="grid grid-cols-5 gap-1 mt-1">
@@ -3794,86 +4324,91 @@ export default function App() {
                         </button>
                         <button 
                           onClick={handleClearBoard}
-                          className="flex items-center gap-1.5 px-2 py-1 bg-red-600 text-white text-[10px] font-mono hover:bg-red-700 transition-all"
+                          className="flex items-center gap-1.5 px-2 py-1 bg-red-600 text-white text-[10px] font-mono hover:bg-red-700 transition-all shadow-[2px_2px_0_0_#141414] active:translate-y-0.5"
                         >
                           <Trash2 size={12} strokeWidth={2} />
                           清空面板
                         </button>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between mt-1 mb-2">
-                      <div className="flex items-center gap-4">
-                        <span className="text-xl font-mono font-bold text-black">总和</span>
-                        <span className="text-4xl font-mono font-extrabold text-black">¥{totalTurnover.toLocaleString()}</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono uppercase">香港特码</span>
-                        <input 
-                          type="text" 
-                          placeholder="01-49"
-                          value={auxSpecialNumberInput}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
-                            setAuxSpecialNumberInput(val);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
+                    <div className="flex flex-col mt-1 mb-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <span className="text-xl font-mono font-bold text-black font-sans">客户港澳总和：</span>
+                          <span className="text-xl font-mono font-bold text-black">¥{clientBothSystemsTotal.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono uppercase">香港特码</span>
+                          <input 
+                            type="text" 
+                            placeholder="01-49"
+                            value={auxSpecialNumberInput}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                              setAuxSpecialNumberInput(val);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const val = parseInt(auxSpecialNumberInput);
+                                if (!isNaN(val) && val >= 1 && val <= 49) {
+                                  setAuxSpecialNumber(val);
+                                  (e.target as HTMLInputElement).blur();
+                                } else if (auxSpecialNumberInput === '') {
+                                  setAuxSpecialNumber(null);
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }
+                            }}
+                            onBlur={() => {
                               const val = parseInt(auxSpecialNumberInput);
                               if (!isNaN(val) && val >= 1 && val <= 49) {
                                 setAuxSpecialNumber(val);
-                                (e.target as HTMLInputElement).blur();
                               } else if (auxSpecialNumberInput === '') {
                                 setAuxSpecialNumber(null);
-                                (e.target as HTMLInputElement).blur();
+                              } else {
+                                setAuxSpecialNumberInput(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
                               }
-                            }
-                          }}
-                          onBlur={() => {
-                            const val = parseInt(auxSpecialNumberInput);
-                            if (!isNaN(val) && val >= 1 && val <= 49) {
-                              setAuxSpecialNumber(val);
-                            } else if (auxSpecialNumberInput === '') {
-                              setAuxSpecialNumber(null);
-                            } else {
-                              setAuxSpecialNumberInput(auxSpecialNumber ? auxSpecialNumber.toString().padStart(2, '0') : '');
-                            }
-                          }}
-                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-gray-100' : ''}`}
-                        />
-                        <span className="text-[10px] font-mono uppercase ml-2">澳门特码</span>
-                        <input 
-                          type="text" 
-                          placeholder="01-49"
-                          value={specialNumberInput}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
-                            setSpecialNumberInput(val);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
+                            }}
+                            className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-gray-50 transition-colors uppercase outline-none ${auxSpecialNumber && auxSpecialNumber > 0 ? 'bg-gray-100' : ''}`}
+                          />
+                          <span className="text-[10px] font-mono uppercase ml-2">澳门特码</span>
+                          <input 
+                            type="text" 
+                            placeholder="01-49"
+                            value={specialNumberInput}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                              setSpecialNumberInput(val);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const val = parseInt(specialNumberInput);
+                                if (!isNaN(val) && val >= 1 && val <= 49) {
+                                  setSpecialNumber(val);
+                                  (e.target as HTMLInputElement).blur();
+                                } else if (specialNumberInput === '') {
+                                  setSpecialNumber(null);
+                                  (e.target as HTMLInputElement).blur();
+                                }
+                              }
+                            }}
+                            onBlur={() => {
                               const val = parseInt(specialNumberInput);
                               if (!isNaN(val) && val >= 1 && val <= 49) {
                                 setSpecialNumber(val);
-                                (e.target as HTMLInputElement).blur();
                               } else if (specialNumberInput === '') {
                                 setSpecialNumber(null);
-                                (e.target as HTMLInputElement).blur();
+                              } else {
+                                setSpecialNumberInput(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
                               }
-                            }
-                          }}
-                          onBlur={() => {
-                            const val = parseInt(specialNumberInput);
-                            if (!isNaN(val) && val >= 1 && val <= 49) {
-                              setSpecialNumber(val);
-                            } else if (specialNumberInput === '') {
-                              setSpecialNumber(null);
-                            } else {
-                              setSpecialNumberInput(specialNumber ? specialNumber.toString().padStart(2, '0') : '');
-                            }
-                          }}
-                          className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-yellow-50' : ''}`}
-                        />
+                            }}
+                            className={`w-12 h-6 border-2 border-[#141414] bg-white text-center text-[11px] font-mono font-bold focus:bg-yellow-100 transition-colors uppercase outline-none ${specialNumber && specialNumber > 0 ? 'bg-yellow-50' : ''}`}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-0.5 mt-1 text-xs text-gray-500 font-mono">
+                        <div>澳-当前客户合计: <span className="font-semibold text-gray-900">¥{macauTotal.toLocaleString()}</span></div>
+                        <div>港-当前客户合计: <span className="font-semibold text-gray-900">¥{hkTotal.toLocaleString()}</span></div>
                       </div>
                     </div>
                   </div>
@@ -3920,7 +4455,8 @@ export default function App() {
                                   hits += item.targets.filter(t => t === specialNumber).length;
                                 }
                               }
-                              return sum + (hits * item.amount);
+                              const earn = hits * item.amount;
+                              return sum + (item.isSplitAmount ? Math.floor(earn) : earn);
                             }, 0);
 
                             return (
@@ -4015,13 +4551,7 @@ export default function App() {
                       <Plus size={16} />
                       <h2 className="text-xs font-mono font-bold uppercase tracking-widest">智能录入系统</h2>
                     </div>
-                    <button 
-                      onClick={handlePopOut}
-                      className="flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded text-[10px] font-bold hover:bg-blue-100 transition-colors"
-                      title="打开悬浮录入助手"
-                    >
-                      🚀 录入助手
-                    </button>
+
                   </div>
                   
                   <div className="flex flex-col gap-2">
@@ -4979,19 +5509,6 @@ export default function App() {
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <label className="text-xs font-mono font-bold uppercase tracking-widest block">开启撤销并粘贴确认弹窗</label>
-                      <p className="text-[10px] font-mono opacity-40">开启后，点击“撤销并粘贴”按钮时会弹出二次确认框。</p>
-                    </div>
-                    <button 
-                      onClick={() => setTempRequireUndoPasteConfirm(!tempRequireUndoPasteConfirm)}
-                      className={`w-10 h-5 rounded-full transition-colors relative ${tempRequireUndoPasteConfirm ? 'bg-indigo-600' : 'bg-gray-300'}`}
-                    >
-                      <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${tempRequireUndoPasteConfirm ? 'left-6' : 'left-1'}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
                       <label className="text-xs font-mono font-bold uppercase tracking-widest block">复制后自动粘贴</label>
                       <p className="text-[10px] font-mono opacity-40">开启后，监控剪切板内容，并在复制动作发生后自动填充录入框。</p>
                     </div>
@@ -5004,11 +5521,76 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-4 pt-2 border-t border-gray-100">
+                {/* 智能图片识别大模型 OCR 设置 */}
+                <div className="space-y-4 pt-4 border-t border-gray-100">
+                  <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-gray-400">智能图片识别 (OCR)</h4>
+                  
+                  <div className="space-y-2">
+                    <label className="text-xs font-mono font-bold uppercase tracking-widest block">识别引擎</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTempOcrEngine('paddle')}
+                        className={`py-2 px-3 border-2 font-mono text-xs font-bold uppercase transition-all ${
+                          tempOcrEngine === 'paddle'
+                            ? 'border-[#141414] bg-[#141414] text-white'
+                            : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                        }`}
+                      >
+                        本地 OCR (Paddle)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTempOcrEngine('gemini')}
+                        className={`py-2 px-3 border-2 font-mono text-xs font-bold uppercase transition-all ${
+                          tempOcrEngine === 'gemini'
+                            ? 'border-[#141414] bg-[#141414] text-white'
+                            : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                        }`}
+                      >
+                        Gemini 大模型
+                      </button>
+                    </div>
+                    <p className="text-[10px] font-mono opacity-40">本地 PaddleOCR 软件离线识别，或使用全球领先的 Gemini 大模型精确解析下注数据。</p>
+                  </div>
+
+                  {tempOcrEngine === 'gemini' && (
+                    <div className="space-y-4 pt-2">
+                      <div className="space-y-2">
+                        <label className="text-xs font-mono font-bold uppercase tracking-widest block">Gemini API Key</label>
+                        <input
+                          type="password"
+                          value={tempGeminiApiKey}
+                          onChange={(e) => setTempGeminiApiKey(e.target.value)}
+                          placeholder="输入您的 Google Gemini API 密钥"
+                          className="w-full p-3 font-mono text-xs border-2 border-[#141414] focus:outline-none focus:bg-gray-50 bg-white"
+                        />
+                        <div className="flex justify-between items-center text-[9px] font-mono opacity-50">
+                          <span>密钥将 100% 仅保存在您的本地个人环境</span>
+                          <a href="https://aistudio.google.com/" target="_blank" rel="noopener noreferrer" className="underline text-indigo-600 font-bold hover:text-indigo-800">[获取免费 API Key]</a>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-xs font-mono font-bold uppercase tracking-widest block">大模型版本</label>
+                        <select
+                          value={tempGeminiModel}
+                          onChange={(e) => setTempGeminiModel(e.target.value)}
+                          className="w-full p-3 font-mono text-xs border-2 border-[#141414] bg-white focus:outline-none focus:bg-gray-50 cursor-pointer"
+                        >
+                          <option value="gemini-2.5-flash">gemini-2.5-flash (推荐：高性价比)</option>
+                          <option value="gemini-2.5-pro">gemini-2.5-pro (超强手写复杂排版分析)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4 pt-2 border-t border-[#141414]/10">
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-xs font-mono font-bold uppercase tracking-widest block">软件分辨率</label>
-                      <p className="text-[10px] font-mono opacity-40">开启“紧凑模式”后优先使用预设尺寸 (730x620)。也可在下方自由调整。</p>
+                      <p className="text-[10px] font-mono opacity-40">开启“紧凑模式”后优先使用预设尺寸 (730x658)。也可在下方自由调整。</p>
                     </div>
                     <button 
                       onClick={() => {
@@ -5016,7 +5598,7 @@ export default function App() {
                         setTempCompactMode(next);
                         if (next) {
                           setTempWidth(730);
-                          setTempHeight(620);
+                          setTempHeight(658);
                         } else {
                           setTempWidth(1420);
                           setTempHeight(903);
@@ -5063,10 +5645,12 @@ export default function App() {
                     setEnableSearchUndo(tempEnableSearchUndo);
                     setSmartSystemRecognition(tempSmartSystemRecognition);
                     setRequireUndoConfirm(tempRequireUndoConfirm);
-                    setRequireUndoPasteConfirm(tempRequireUndoPasteConfirm);
                     setAutoPasteEnabled(tempAutoPasteEnabled);
                     setFollowCustomerRisk(tempFollowCustomerRisk);
                     setEnableCustomerEatingReport(tempEnableCustomerEatingReport);
+                    setOcrEngine(tempOcrEngine);
+                    setGeminiApiKey(tempGeminiApiKey);
+                    setGeminiModel(tempGeminiModel);
                     
                     if (tempCompactMode !== isCompactMode || tempWidth !== customWidth || tempHeight !== customHeight) {
                       setIsCompactMode(tempCompactMode);
@@ -5088,10 +5672,12 @@ export default function App() {
                     localStorage.setItem(getSysKey('enableSearchUndo'), tempEnableSearchUndo.toString());
                     localStorage.setItem(getSysKey('smartSystemRecognition'), tempSmartSystemRecognition.toString());
                     localStorage.setItem(getSysKey('requireUndoConfirm'), tempRequireUndoConfirm.toString());
-                    localStorage.setItem(getSysKey('requireUndoPasteConfirm'), tempRequireUndoPasteConfirm.toString());
                     localStorage.setItem(getSysKey('autoPasteEnabled'), tempAutoPasteEnabled.toString());
                     localStorage.setItem(getSysKey('followCustomerRisk'), tempFollowCustomerRisk.toString());
                     localStorage.setItem(getSysKey('enableCustomerEatingReport'), tempEnableCustomerEatingReport.toString());
+                    localStorage.setItem('ocr_engine', tempOcrEngine);
+                    localStorage.setItem('gemini_api_key', tempGeminiApiKey);
+                    localStorage.setItem('gemini_model', tempGeminiModel);
                     setIsSettingsOpen(false);
                   }}
                   className="w-full bg-[#141414] text-[#E4E3E0] py-4 font-mono text-sm font-bold hover:bg-opacity-90 active:bg-black active:scale-[0.98] transition-all transform duration-100"
@@ -5537,8 +6123,8 @@ const NumberMatrix = ({ financeBetData, specialNumber, auxSpecialNumber, isCompa
                 {getZodiacByNumber(num)}
               </span>
             </div>
-            <div className="w-18 h-6 flex items-center justify-start px-1 border border-gray-200 text-left text-[11pt] font-bold bg-white text-[#141414]">
-              {amount > 0 ? amount.toFixed(0) : ''}
+            <div className={`w-18 h-6 flex items-center justify-start px-1 border border-gray-200 text-left text-[11pt] font-bold bg-white ${amount < 0 ? 'text-red-500 bg-red-50/70 border-red-200' : 'text-[#141414]'}`}>
+              {amount !== 0 ? amount.toFixed(0) : ''}
             </div>
           </div>
         );
@@ -5647,7 +6233,8 @@ const RecordsList = ({
                   hits += item.targets.filter((t: any) => t === specialNumber).length;
                 }
               }
-              return sum + (hits * item.amount);
+              const earn = hits * item.amount;
+              return sum + (item.isSplitAmount ? Math.floor(earn) : earn);
             }, 0)
           : 0;
 
@@ -5731,18 +6318,24 @@ const EntryModalContent = React.memo(({
   isSwitchingSystem: _isSwitchingSystem, popOutTargetId, setPopOutTargetId, selectedCustomerId, 
   setSelectedCustomerId, customers, handlePopOut, standaloneMode, dragControls, 
   handlePasteAndRecognize, triggerLastUndo, setIsModalOpen, error,
-  externalValue, onValueChange, onClearBoard
+  externalValue, onValueChange, triggerClearAndPaste, clearConfirmActive,
+  ocrLoading, ocrProgress, processImageFile
 }: any) => {
-  console.log('DEBUG: EntryModalContent rendering, isOpen:', isOpen, 'standaloneMode:', standaloneMode, 'onClearBoard defined:', !!onClearBoard);
   const previewScrollRef = useRef<HTMLDivElement>(null);
+  const [modalIsDragging, setModalIsDragging] = useState(false);
   
   // 核心优化：内部私有状态，打字时不触发父组件重绘，实现秒回显
   const [internalValue, setInternalValue] = useState(externalValue || '');
+  const [textareaKey, setTextareaKey] = useState(0);
 
   // 当外部强制改变（如清空、粘贴）时同步
   useEffect(() => {
     if (externalValue !== undefined && externalValue !== internalValue) {
       setInternalValue(externalValue || '');
+      // 仅在高负载大段粘贴（长度 > 1000）下才触发重新挂载，清空时坚决保持原生 DOM 不被销毁，防止原生的焦点状态和 selection 丢失
+      if (externalValue && externalValue.length > 1000) {
+        setTextareaKey(prev => prev + 1);
+      }
     }
   }, [externalValue]);
 
@@ -5760,14 +6353,24 @@ const EntryModalContent = React.memo(({
     return () => clearTimeout(timer);
   }, [internalValue, externalValue, onValueChange]);
 
-  // 关键：当弹窗从隐藏转为显示时，手动触发 focus
+  // 关键：当弹窗从隐藏转为显示时，或 DOM 重新挂载后，手动触发 focus
   useEffect(() => {
-    if (isOpen) {
-      if (modalInputRef && modalInputRef.current) {
-        modalInputRef.current.focus();
-      }
+    if (isActuallyVisible) {
+      const focus = () => {
+        if (modalInputRef && modalInputRef.current) {
+          modalInputRef.current.focus();
+          // 如果是清空操作，确保光标在最前面，如果是粘贴，确保在最后面
+          const len = modalInputRef.current.value.length;
+          modalInputRef.current.setSelectionRange(len, len);
+        }
+      };
+      
+      focus();
+      // 在 Electron 中，渲染压力大时可能需要微秒级延时
+      const timer = setTimeout(focus, 50);
+      return () => clearTimeout(timer);
     }
-  }, [isOpen, modalInputRef]);
+  }, [isActuallyVisible, modalInputRef, textareaKey]);
 
   return (
     <div 
@@ -5811,21 +6414,12 @@ const EntryModalContent = React.memo(({
         <div 
           onPointerDown={(e: any) => dragControls.start(e)}
           className="flex items-center justify-between border-b border-[#141414] pb-2 cursor-move select-none"
-          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          style={!standaloneMode ? { WebkitAppRegion: 'drag' } as React.CSSProperties : {}}
         >
           <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest pointer-events-none text-[#141414]">
-              DEBUG 标题
+              智能下注录入
             </h3>
-            <button 
-              onClick={handlePopOut}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="flex items-center gap-1 px-1.5 py-0.5 bg-white border border-gray-300 rounded text-[9px] font-bold hover:bg-gray-50 transition-colors text-[#141414]"
-              title="在独立窗口中打开"
-            >
-              <ExternalLink size={10} />
-              窗口独立
-            </button>
           </div>
             <button 
               onClick={() => {
@@ -5843,7 +6437,7 @@ const EntryModalContent = React.memo(({
             </button>
         </div>
 
-        <div className="flex-1 flex flex-col gap-4 min-h-0">
+        <div className="flex-1 flex flex-col gap-4 min-h-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-mono font-bold opacity-60 uppercase text-[#141414]">录入给:</span>
@@ -5872,15 +6466,51 @@ const EntryModalContent = React.memo(({
             )}
           </div>
 
-          <div className="flex-1 flex flex-col space-y-1 min-h-0">
-            <div className="flex justify-between items-end">
-              <label className="text-[10px] font-mono font-bold uppercase opacity-60 text-[#141414]">需识别文字:</label>
+
+          <div className="flex-1 flex flex-col space-y-1 min-h-0 relative">
+            <div className="flex justify-between items-center">
+              <label className="text-[10px] font-mono font-bold uppercase opacity-60 text-[#141414]">输入文字内容:</label>
             </div>
+            {ocrLoading && (
+              <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center p-4 border-2 border-dashed border-indigo-500 animate-pulse">
+                <div className="text-sm font-mono font-bold text-indigo-700 mb-1">📷 {ocrProgress}</div>
+                <div className="text-[10px] text-gray-400 font-mono">离线安全通道：100% 物理级单机解析，不消耗外部网络流量</div>
+              </div>
+            )}
             <textarea
+              key={textareaKey}
               ref={modalInputRef}
-              autoFocus
               value={internalValue}
-              onChange={(e) => setInternalValue(e.target.value)}
+              autoFocus
+              spellCheck={false}
+              onChange={(e) => {
+                setInternalValue(e.target.value);
+                onValueChange(e.target.value);
+              }}
+              onPaste={async (e) => {
+                const items = e.clipboardData.items;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    if (file) {
+                      e.preventDefault();
+                      await processImageFile(file);
+                    }
+                  }
+                }
+              }}
+              onDragOver={(e) => { e.preventDefault(); setModalIsDragging(true); }}
+              onDragLeave={() => setModalIsDragging(false)}
+              onDrop={async (e) => {
+                e.preventDefault();
+                setModalIsDragging(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  const file = e.dataTransfer.files[0];
+                  if (file.type.startsWith('image/')) {
+                    await processImageFile(file);
+                  }
+                }
+              }}
               onKeyDown={(e) => {
                 if (showLastUndoConfirm) return;
                 if (e.key === 'Enter' && e.shiftKey) {
@@ -5888,7 +6518,12 @@ const EntryModalContent = React.memo(({
                   handleParse(false, internalValue);
                 }
               }}
-              className="w-full flex-1 p-3 font-mono text-base border-2 border-gray-400 focus:outline-none bg-white resize-none shadow-inner rounded-none text-[#141414]"
+              onClick={() => modalInputRef.current?.focus()}
+              placeholder={modalIsDragging ? "松开鼠标载入并识别图片内容 (PaddleOCR-json)..." : "请在此输入或粘贴彩票下注信息（支持直接粘贴截图或拖入图片启动离线OCR）..."}
+              className={`w-full h-32 p-3 font-mono text-base border-2 focus:border-blue-500 focus:outline-none transition-all resize-none shadow-inner text-[#141414] cursor-text relative z-10 ${
+                modalIsDragging ? "border-dashed border-indigo-500 bg-indigo-50/50 scale-[0.99]" : "border-gray-400 bg-white"
+              }`}
+              style={{ WebkitAppRegion: 'no-drag', caretColor: '#141414' } as any}
             />
           </div>
 
@@ -5911,44 +6546,45 @@ const EntryModalContent = React.memo(({
           )}
         </div>
 
-          <div className="flex flex-wrap gap-1 mt-2">
-            <button 
-              onClick={() => {
-                onClearBoard();
-                setInternalValue('');
-              }}
-              className="bg-red-500 hover:bg-red-600 border border-black px-4 py-4 text-2xl font-bold transition-all active:bg-red-700 rounded shadow-lg text-white whitespace-nowrap"
-            >
-              清空面板 (DEBUG V2)
-            </button>
-            <button 
-              onClick={handlePasteAndRecognize}
-              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-            >
-              粘贴识别
-            </button>
-            <button 
-              onClick={() => {
-                modalInputRef.current?.focus();
-                setLastSubmittedModalValue('');
-              }}
-              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-            >
-              重新识别
-            </button>
-            <button 
-              onClick={() => setInternalValue('')}
-              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-            >
-              清空
-            </button>
-            <button 
-              onClick={triggerLastUndo}
-              className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 px-2 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
-            >
-              撤销
-            </button>
-          </div>
+        <div className="grid grid-cols-5 gap-1 mt-2">
+          <button 
+            onClick={handlePasteAndRecognize}
+            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+          >
+            粘贴识别
+          </button>
+          <button 
+            onClick={() => {
+              modalInputRef.current?.focus();
+              setLastSubmittedModalValue('');
+            }}
+            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+          >
+            重新识别
+          </button>
+          <button 
+            onClick={() => setInternalValue('')}
+            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+          >
+            清内容
+          </button>
+          <button 
+            onClick={triggerLastUndo}
+            className="bg-[#F0F0F0] hover:bg-[#E0E0E0] border border-gray-400 py-2.5 text-[10px] font-bold transition-all active:bg-gray-300 rounded-none shadow-sm text-[#141414] whitespace-nowrap"
+          >
+            撤销
+          </button>
+          <button 
+            onClick={() => triggerClearAndPaste()}
+            className={`${
+              clearConfirmActive 
+                ? "bg-red-600 hover:bg-red-700 border-red-700 text-white animate-pulse" 
+                : "bg-amber-100 hover:bg-amber-200 border-amber-400 text-amber-900 active:bg-amber-300"
+            } border py-2.5 text-[10px] font-bold transition-all rounded-none shadow-sm whitespace-nowrap font-bold`}
+          >
+            {clearConfirmActive ? '⚠️ 再次确认！' : '清空数据并粘贴'}
+          </button>
+        </div>
         <div className="grid grid-cols-5 gap-1 mt-1">
           <button 
             onClick={() => handleParse(false, internalValue)}

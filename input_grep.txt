@@ -1,0 +1,54 @@
+188:  const [inputValue, setInputValue] = useState('');
+596:  const splitBySystem = useCallback((input: string): { system: 'HK' | 'MO', text: string }[] => {
+597:    if (!input || !input.trim()) return [];
+601:      return [{ system: 'MO', text: input }];
+609:    const hasMo = moKeywords.some(kw => input.includes(kw));
+610:    const hasHk = hkKeywords.some(kw => input.includes(kw));
+613:    if (!hasMo && !hasHk) return [{ system: 'MO', text: input }];
+618:      let pos = input.indexOf(kw);
+625:        pos = input.indexOf(kw, pos + 1);
+645:    const rawTextAfterLast = input.substring(lastOcc.index + lastOcc.length).trim();
+657:      const end = nextOcc ? nextOcc.index : input.length;
+658:      const chunk = input.substring(start, end).trim();
+692:    return result.length > 0 ? result : [{ system: 'MO', text: input }];
+1392:  const inputRef = useRef<HTMLTextAreaElement>(null);
+1398:  // Auto-scroll preview to bottom when input changes
+1405:  // FIX: 自动聚焦逻辑 - 如果是 standalone 模式，监视 inputValue 变化并自动聚焦
+2061:    const inputToParse = customInput !== undefined ? customInput : (modalInputValue || '');
+2062:    if (!inputToParse || !inputToParse.trim()) return;
+2085:          text: inputToParse,
+2094:          text: inputToParse,
+2104:      setLastSubmittedModalValue(inputToParse);
+2107:      console.log(`[Standalone Submit] Target: ${popOutTargetId}, ID: ${msgId}, Content Length: ${inputToParse.length}`);
+2112:        setModalInputValue(inputToParse);
+2113:        setLocalModalValue(inputToParse);
+2157:          handleParseRef.current(isNegative, inputToParse, finalTargetId);
+2164:    const rawTasks = splitBySystem(inputToParse);
+2350:      raw: inputToParse.length > 200 ? inputToParse.substring(0, 200) + '...' : inputToParse,
+2351:      fullRaw: inputToParse,
+2402:    setLastSubmittedModalValue(inputToParse);
+2951:  const formatModalResults = (input: string): { preview: React.ReactNode, rawPreview: string, total: number } => {
+2952:    if (!input.trim()) return { preview: '等待输入...', rawPreview: '等待输入...', total: 0 };
+2954:      const tasks = splitBySystem(input);
+3186:              <input 
+3200:              <input 
+3332:                <input 
+3341:                <input 
+3940:                        <input 
+3973:                        <input 
+4280:                               <input 
+4287:                               <input 
+4343:                          <input 
+4667:                          <input 
+4689:                    <input 
+5006:                    <input 
+5020:                    <input 
+5156:                      <input 
+5165:                      <input 
+5248:                  <input 
+5261:                    <input 
+5341:                    <input 
+5496:                      <input
+5500:                        inputMode="numeric"
+5523:                        <input
+5527:                          inputMode="numeric"

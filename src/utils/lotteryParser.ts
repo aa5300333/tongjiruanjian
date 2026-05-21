@@ -68,6 +68,7 @@ export interface ParseResult {
   raw: string;
   type: 'single' | '三中三' | '二中二' | '特碰';
   banker?: number; // For 特碰
+  isSplitAmount?: boolean;
 }
 
 export const STRONG_KEYWORDS = [
@@ -83,6 +84,57 @@ export const DATA_CONNECTORS = ['*', '/', '-', '–', '—', '－', '@', '.', ',
 /**
  * 纠错词表：错别字 -> 正确文字
  */
+export const TRADING_DICTIONARY: Record<string, string[]> = {
+  // 1. 生肖类
+  "鼠": ["鼠", "疏", "速", "薯", "属", "书"],
+  "牛": ["牛", "午", "件", "牟", "扭", "妞"],
+  "虎": ["虎", "虑", "虚", "琥", "府", "付"],
+  "兔": ["兔", "免", "逸", "吐"],
+  "龙": ["龙", "尤", "陇", "隆", "拢"],
+  "蛇": ["蛇", "它", "驼", "舵", "舌", "舍"],
+  "马": ["马", "吗", "乌", "玛", "嘛"],
+  "羊": ["羊", "美", "半", "洋", "阳"],
+  "猴": ["猴", "侯", "族", "喉", "候", "后", "𤠣"],
+  "鸡": ["鸡", "鸣", "鸟", "基", "机"],
+  "狗": ["狗", "拘", "句", "枸", "购"],
+  "猪": ["猪", "者", "诸", "茱", "朱", "珠"],
+
+  // 2. 玩法与边界类
+  "红波": ["红波", "红婆", "红披", "红玻", "虹波"],
+  "蓝波": ["蓝波", "蓝婆", "兰波", "篮波", "烂波"],
+  "绿波": ["绿波", "绿婆", "绿泼", "缘波", "律波"],
+  "合单": ["合单", "合弹", "和单", "河单"],
+  "合双": ["合双", "合爽", "和双", "盒双", "合箱"],
+  "港": ["港", "巷", "香"],
+  "澳": ["澳", "奥", "奥", "懊", "粤"]
+};
+
+// 强力清洗函数：用于 OCR 字符串进入输入框前的第一步清洗
+export function finalCleanText(rawOcrText: string): string {
+  let resultText = rawOcrText;
+
+  // 1. 统一清除所有英文字符 (不分大小写)
+  resultText = resultText.replace(/[a-zA-Z]/g, '');
+
+  // 2. 遍历我们的纠错字典
+  for (const [correctWord, wrongList] of Object.entries(TRADING_DICTIONARY)) {
+    wrongList.forEach(wrong => {
+      if (wrong !== correctWord) {
+        // 把所有可能认错的形似字，全部强行替换成标准的玩法词
+        resultText = resultText.split(wrong).join(correctWord);
+      }
+    });
+  }
+
+  // 3. 针对数字连笔的特殊符号统一清洗并转换为 . 
+  resultText = resultText.replace(/[\.\,，、\-:_：]/g, '.');
+  
+  // 4. 将可能连续产生的点号合并为单个点
+  resultText = resultText.replace(/\.+/g, '.');
+  
+  return resultText;
+}
+
 const TYPO_MAP: Record<string, string> = {
   '兰': '蓝',
   '兰色': '蓝色',
@@ -93,14 +145,18 @@ const TYPO_MAP: Record<string, string> = {
   '毎': '每',
   '個': '个',
   '一字': '各',
-  '个字': '各',
+  '个字': 'fast各', // 我们在下面会进一步统一
   '字': '各',
   '一粒': '各',
   '每个号': '各',
-  '各号': '各',
+  '各一个': 'fast各',
   '一个号': '各',
+  '一个': '各',
+  '每个': '各',
+  '各号': '各',
   '个号': '各',
   '个': '各',
+  '名': '各',
   '俩': '2',
   '澳碼': '澳码',
   '港碼': '港码',
@@ -112,6 +168,7 @@ const TYPO_MAP: Record<string, string> = {
   '狗': '狗',
   '猴': '猴',
   '鼠': '鼠',
+  '𤠣': '猴',
 };
 
 /**
@@ -119,8 +176,19 @@ const TYPO_MAP: Record<string, string> = {
  */
 export const correctTypos = (text: string): string => {
   let corrected = text;
+
+  // 1. 先运行终极业务纠错字典 (TRADING_DICTIONARY) 替换
+  for (const [correctWord, wrongList] of Object.entries(TRADING_DICTIONARY)) {
+    wrongList.forEach(wrong => {
+      if (wrong !== correctWord) {
+        corrected = corrected.split(wrong).join(correctWord);
+      }
+    });
+  }
+
+  // 2. 运行原本其它的 TYPO_MAP 替换
   Object.entries(TYPO_MAP).forEach(([typo, correct]) => {
-    // 使用正则全局替换，且尽量避免破坏非目标词汇
+    // 避免重复定义导致的空词或者冲突，如果替换词在 TRADING_DICTIONARY 中已经被覆盖了，则不一定需要特殊正则，做简单replace
     corrected = corrected.replace(new RegExp(typo, 'g'), correct);
   });
   return corrected;
@@ -542,6 +610,9 @@ export function parseInput(input: string): ParseResult[] {
 
   // 3. 统一转换中文数字，确保后续逻辑（如范围、头尾处理）能识别阿拉伯数字
   preProcessed = replaceChinese(preProcessed);
+
+  // 额外清洗：如果已经有了“各/字/包/名”在前面，跟在后面的多余的“各/字/名/个/一个/个字/各一个”是完全冗余的
+  preProcessed = preProcessed.replace(/(各|字|包|名)\s*(\d+|\d+\.\d+)\s*(各|字|名|个|一个|个字|各一个)(?!\s*\d)/gi, '$1 $2 ');
 
   // 预处理：波色展开 (蓝绿波 -> 蓝波 绿波)
   preProcessed = expandWaves(preProcessed);
@@ -1088,7 +1159,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     }).join(' ');
   };
 
-  // 清理金额字符串，只保留数字和中文数字，防止由于系统词粘连导致的解析失败
+  // 清理金额字符串，只保留数字和中文数字，防止由于 system 词粘连导致的解析失败
   const cleanAmountStr = amountStr.replace(/[^\d一二三四五六七八九十百千万]/g, '');
   const amount = chineseToNumber(cleanAmountStr);
   if (isNaN(amount) || amount === 0) return null;
@@ -1128,6 +1199,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
     }
   } else {
     // 特码逻辑：收集该段内所有的号码
+    const parsedGroups: { numbers: number[], raw: string }[] = [];
     // 保护包含关键字的特殊组合 (如 '合单')，防止被后续的干扰词移除逻辑误删
     const PROTECTED_COMBOS = ['倒反数', '反数', '反字', '倒反', '反'];
     let protectedStr = targetsStr;
@@ -1367,7 +1439,9 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
         }
         if (intersectionNums.length > 0) {
           allNumbersFromSegments.push(...intersectionNums);
-          rawTokens.push(matchedKeysInWord.join('')); // 交集内部紧凑
+          const rawText = matchedKeysInWord.join(''); // 交集内部紧凑
+          rawTokens.push(rawText);
+          parsedGroups.push({ numbers: intersectionNums, raw: rawText });
           return;
         }
       }
@@ -1478,6 +1552,7 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
             if (v >= 1 && v <= 49) txt = txt.padStart(2, '0');
           }
           rawTokens.push(txt);
+          parsedGroups.push({ numbers: t.nums, raw: txt });
         });
       }
     });
@@ -1486,6 +1561,25 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
       // 备注：不执行最终去重，尊重并集下注目标累加逻辑 (如 "红双 小" -> 9 + 24 = 33)
       const finalNumbers = allNumbersFromSegments; 
       const isSplitAmount = bestMatch && bestMatch.keyword === '包';
+      const hasEachSplitting = isSplitAmount && (segment.includes('各') || segment.includes('各包'));
+
+      if (hasEachSplitting && parsedGroups.length > 0) {
+        return parsedGroups.map(group => {
+          let normRaw = group.raw;
+          if (normRaw === '红' || normRaw === '蓝' || normRaw === '绿') {
+            normRaw += '波';
+          }
+          const groupAmount = amount / group.numbers.length;
+          return {
+            numbers: group.numbers,
+            amount: groupAmount,
+            raw: normRaw,
+            type: comboType,
+            isSplitAmount: true
+          };
+        });
+      }
+
       const finalAmount = isSplitAmount ? (amount / finalNumbers.length) : amount;
 
       // 规范化显示：红/蓝/绿 -> 红波/蓝波/绿波
@@ -1498,7 +1592,8 @@ function parseSegment(segment: string, keywords: string[], comboKeywords: string
         numbers: finalNumbers,
         amount: finalAmount,
         raw: normalizedRaw,
-        type: comboType
+        type: comboType,
+        isSplitAmount: isSplitAmount
       }];
     }
 

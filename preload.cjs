@@ -29,5 +29,8 @@ contextBridge.exposeInMainWorld('electron', {
   },
   notifySettingsUpdated: () => {
     ipcRenderer.send('settings-updated');
+  },
+  performOfflineOcr: async (base64Data) => {
+    return ipcRenderer.invoke('perform-offline-ocr', base64Data);
   }
 });
